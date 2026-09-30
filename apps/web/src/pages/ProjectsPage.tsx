@@ -17,7 +17,7 @@ export function ProjectsPage() {
     setPending(true)
     try {
       const projectId = await startDemoProject()
-      navigate(`/simular/${projectId}`, { state: { start: "surface" } })
+      navigate(`/simular/${projectId}`, { state: { start: "detect" } })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível abrir a demonstração.")
       setPending(false)

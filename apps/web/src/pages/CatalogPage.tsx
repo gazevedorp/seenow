@@ -1,18 +1,12 @@
 import { useMemo, useState } from "react"
-import { CATEGORY_LABEL, type ProductCategory } from "@seenow/shared"
+import { CATEGORY_LABEL, PRODUCT_CATEGORIES, surfaceLabel, type ProductCategory } from "@seenow/shared"
 import { cn } from "cn"
 import { Input } from "@/components/ui/input"
 import { ProductSwatch } from "@/components/catalog/ProductSwatch"
-import { categoryLabel, filterCatalog, swatchSurface } from "@/lib/catalog"
+import { categoryLabel, filterCatalog } from "@/lib/catalog"
 import { useTitle } from "@/lib/use-title"
 
-const FILTERS: Array<ProductCategory | "ALL"> = [
-  "ALL",
-  "PISOS",
-  "PORCELANATOS",
-  "REVESTIMENTOS",
-  "TINTAS",
-]
+const FILTERS: Array<ProductCategory | "ALL"> = ["ALL", ...PRODUCT_CATEGORIES]
 
 export function CatalogPage() {
   const [query, setQuery] = useState("")
@@ -25,7 +19,7 @@ export function CatalogPage() {
       <p className="text-xs tracking-[0.18em] text-muted-foreground uppercase">Demonstração</p>
       <h1 className="mt-1 font-display text-5xl tracking-tight">Catálogo</h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-        Oito produtos para validar piso e parede. O cadastro manual da loja chega na fase 2.
+        Pisos e revestimentos com textura contínua. A prévia usa o arquivo do SKU, não uma cor inventada.
       </p>
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
@@ -57,18 +51,17 @@ export function CatalogPage() {
         <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {products.map((product) => (
             <li key={product.id} className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
-              <ProductSwatch product={product} surface={swatchSurface(product)} />
+              <ProductSwatch product={product} />
               <div className="space-y-1 p-3">
                 <p className="font-medium">{product.name}</p>
                 <p className="text-xs text-muted-foreground">
                   {product.brand} · {product.sku}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {categoryLabel(product.category)}
+                  {surfaceLabel(product.surface)} · {categoryLabel(product.category)}
                   {product.finish ? ` · ${product.finish}` : ""}
                   {product.dimensions ? ` · ${product.dimensions}` : ""}
                 </p>
-                {product.hex ? <p className="text-xs tracking-wide text-muted-foreground">{product.hex}</p> : null}
               </div>
             </li>
           ))}

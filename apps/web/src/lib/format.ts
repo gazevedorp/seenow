@@ -26,9 +26,14 @@ export function formatPercent(fraction: number): string {
 }
 
 export function providerLabel(provider: string): string {
-  if (provider === "mock") return "Simulação local"
+  if (provider === "mock") return "Composto local"
   if (provider === "openai") return "OpenAI"
   if (provider === "replicate") return "Replicate"
+  if (provider === "huggingface") return "Hugging Face"
+  if (provider === "fal") return "Fal"
+  if (provider === "local") return "Textura em perspectiva"
+  if (provider === "geometric") return "Recorte geométrico"
+  if (provider === "unconfigured") return "Não configurado"
   return provider
 }
 

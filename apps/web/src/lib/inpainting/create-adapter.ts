@@ -1,3 +1,7 @@
+/**
+ * Legacy adapter for a future Nest API.
+ * The studio preview does not use it: material is perspective-warp-v1, polish is Flux Fill.
+ */
 import type { InpaintingAdapter } from "@seenow/shared"
 import { MockInpaintingAdapter } from "@/lib/inpainting/mock-adapter"
 import { RemoteInpaintingAdapter } from "@/lib/inpainting/remote-adapter"

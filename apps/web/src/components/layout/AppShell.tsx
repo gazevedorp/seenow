@@ -3,10 +3,17 @@ import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useSession, auth } from "@/lib/auth"
+import { usePipelineStatus } from "@/lib/pipeline/api"
 
 export function AppShell() {
   const session = useSession()
   const navigate = useNavigate()
+  const pipeline = usePipelineStatus()
+  const pipelineLabel = !pipeline
+    ? "Lendo provedores…"
+    : pipeline.segmentation.configured
+      ? pipeline.segmentation.label
+      : "Sem SegFormer"
 
   return (
     <div className="min-h-svh">
@@ -41,7 +48,9 @@ export function AppShell() {
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            <Badge variant="secondary">Demonstração</Badge>
+            <Badge variant="secondary" title={pipeline?.segmentation.label ?? ""}>
+              {pipelineLabel}
+            </Badge>
             <span className="hidden text-sm text-muted-foreground md:inline">
               {session?.organizationName}
             </span>

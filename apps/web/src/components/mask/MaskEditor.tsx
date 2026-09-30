@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import type { Surface } from "@seenow/shared"
 import { Button } from "@/components/ui/button"
-import { autoMask, stampLine } from "@/lib/mask"
+import { stampLine } from "@/lib/mask"
 
 function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number, height: number) {
   const context = canvas.getContext("2d")
@@ -25,14 +25,22 @@ export function MaskEditor({
   height,
   surface,
   mask,
+  showOverlay = true,
+  hint,
   onChange,
+  onRedetect,
+  redetectLabel = "Detectar de novo",
 }: {
   source: HTMLCanvasElement
   width: number
   height: number
   surface: Surface
   mask: Uint8Array
+  showOverlay?: boolean
+  hint: string
   onChange: (next: Uint8Array) => void
+  onRedetect?: () => void
+  redetectLabel?: string
 }) {
   const viewRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -125,9 +133,9 @@ export function MaskEditor({
         <canvas ref={viewRef} className="absolute inset-0 h-full w-full" />
         <canvas
           ref={overlayRef}
-          aria-label="Editor de máscara"
+          aria-label={surface === "FLOOR" ? "Editor da máscara do piso" : "Editor da máscara da parede"}
           className="absolute inset-0 h-full w-full touch-none"
-          style={{ cursor: tool === "add" ? "crosshair" : "cell" }}
+          style={{ cursor: tool === "add" ? "crosshair" : "cell", opacity: showOverlay ? 1 : 0 }}
           onPointerDown={(event) => {
             const point = locate(event)
             if (!point) return
@@ -196,17 +204,11 @@ export function MaskEditor({
         >
           Desfazer
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            remember()
-            publish(autoMask(width, height, surface))
-          }}
-        >
-          Sugerir de novo
-        </Button>
+        {onRedetect ? (
+          <Button type="button" size="sm" variant="outline" onClick={onRedetect}>
+            {redetectLabel}
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -219,12 +221,7 @@ export function MaskEditor({
           Limpar
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {surface === "FLOOR"
-          ? "A sugestão cobre o piso. Apague móveis e vasos que não devem mudar."
-          : "A sugestão cobre a parede e reserva a janela de exemplo. Ajuste o quadro se quiser mantê-lo."}{" "}
-        Sugestão local, sem OpenAI nesta fase.
-      </p>
+      <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   )
 }

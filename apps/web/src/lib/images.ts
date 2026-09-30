@@ -71,6 +71,37 @@ export async function blobToCanvas(blob: Blob): Promise<HTMLCanvasElement> {
   return canvas
 }
 
+export function scaleCanvas(source: HTMLCanvasElement, maxEdge: number): HTMLCanvasElement {
+  const longEdge = Math.max(source.width, source.height)
+  if (longEdge <= maxEdge) return source
+  const scale = maxEdge / longEdge
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round(source.width * scale))
+  canvas.height = Math.max(1, Math.round(source.height * scale))
+  const context = canvas.getContext("2d")
+  if (!context) return source
+  context.drawImage(source, 0, 0, canvas.width, canvas.height)
+  return canvas
+}
+
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ""
+  const chunk = 0x8000
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+  }
+  return btoa(binary)
+}
+
+export async function canvasToBase64(
+  canvas: HTMLCanvasElement,
+  type = "image/jpeg",
+  quality = 0.9,
+): Promise<string> {
+  return blobToBase64(await canvasToBlob(canvas, type, quality))
+}
+
 export function maskToPng(mask: Uint8Array, width: number, height: number): Promise<Blob> {
   const canvas = document.createElement("canvas")
   canvas.width = width

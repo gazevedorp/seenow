@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useParams } from "react-router-dom"
 import {
-  buildTechnicalPrompt,
-  productToInput,
+  GEOMETRIC_MASK_MODEL,
+  PERSPECTIVE_WARP_MODEL,
   surfaceLabel,
   type InpaintingResultMeta,
   type Surface,
@@ -12,16 +12,16 @@ import { cn } from "cn"
 import { BeforeAfterSlider } from "@/components/compare/BeforeAfterSlider"
 import { GenerationHistoryList } from "@/components/history/GenerationHistoryList"
 import { MaskEditor } from "@/components/mask/MaskEditor"
+import { MaskOverlay } from "@/components/mask/MaskOverlay"
 import { ProductPicker } from "@/components/catalog/ProductPicker"
-import { SurfaceSelector } from "@/components/surfaces/SurfaceSelector"
 import { EnvironmentUploader } from "@/components/upload/EnvironmentUploader"
 import { Button } from "@/components/ui/button"
 import { findProduct } from "@/lib/catalog"
 import { getBlob, keys, putBlob, studioDb, useStudio } from "@/lib/db"
-import { delay, formatBrl, formatPercent, providerLabel } from "@/lib/format"
+import { formatBrl, formatPercent, providerLabel } from "@/lib/format"
 import { blobToCanvas, canvasToBlob, fileToWorkingCanvas } from "@/lib/images"
-import { createInpaintingAdapter } from "@/lib/inpainting/create-adapter"
 import { autoMask, maskCoverage } from "@/lib/mask"
+import { detectRoom, renderPreview, usePipelineStatus, type MaskSource } from "@/lib/pipeline/api"
 import { renderSampleRoom } from "@/lib/sample-room"
 import { useObjectUrl } from "@/lib/use-object-url"
 import { useGenerationThumbs } from "@/lib/use-generation-media"
@@ -29,25 +29,30 @@ import { useTitle } from "@/lib/use-title"
 
 const STEPS = [
   { id: "photo", label: "Foto" },
-  { id: "surface", label: "Superfície" },
+  { id: "detect", label: "Detecção" },
   { id: "product", label: "Produto" },
-  { id: "mask", label: "Máscara" },
-  { id: "result", label: "Resultado" },
+  { id: "preview", label: "Prévia" },
 ] as const
 
 type StepId = (typeof STEPS)[number]["id"]
+
+function normalizeStart(value: string | undefined): StepId | null {
+  if (value === "surface" || value === "mask") return "detect"
+  if (value === "result") return "preview"
+  if (value === "photo" || value === "detect" || value === "product" || value === "preview") return value
+  return null
+}
 
 export function SimulatePage() {
   const { projectId = "" } = useParams()
   const location = useLocation()
   const studio = useStudio()
+  const pipeline = usePipelineStatus()
   const project = studio.projects.find((item) => item.id === projectId)
   const client = studio.clients.find((item) => item.id === project?.clientId)
   const generations = useMemo(
     () =>
-      studio.generations.filter(
-        (item) => item.projectId === projectId && item.status === "SUCCEEDED",
-      ),
+      studio.generations.filter((item) => item.projectId === projectId && item.status === "SUCCEEDED"),
     [studio.generations, projectId],
   )
 
@@ -56,23 +61,36 @@ export function SimulatePage() {
   const [photoNote, setPhotoNote] = useState<string | null>(null)
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null)
   const previewUrl = useObjectUrl(previewBlob)
-  const [surface, setSurface] = useState<Surface | null>(null)
+  const [editSurface, setEditSurface] = useState<Surface>("FLOOR")
+  const [surfaceOverride, setSurfaceOverride] = useState<Surface | null>(null)
   const [productId, setProductId] = useState<string | null>(null)
-  const [mask, setMask] = useState<Uint8Array | null>(null)
-  const [confirmed, setConfirmed] = useState(false)
+  const [floorMask, setFloorMask] = useState<Uint8Array | null>(null)
+  const [wallMask, setWallMask] = useState<Uint8Array | null>(null)
+  const [depth, setDepth] = useState<Float32Array | null>(null)
+  const [depthModel, setDepthModel] = useState<string | null>(null)
+  const [maskSource, setMaskSource] = useState<MaskSource | null>(null)
+  const [showMask, setShowMask] = useState(true)
+  const [detecting, setDetecting] = useState(false)
+  const [detectError, setDetectError] = useState<string | null>(null)
+  const [detectedFor, setDetectedFor] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [phase, setPhase] = useState("Aplicando o material…")
   const [error, setError] = useState<string | null>(null)
+  const [polishNote, setPolishNote] = useState<string | null>(null)
   const [resultBlob, setResultBlob] = useState<Blob | null>(null)
   const [beforeBlob, setBeforeBlob] = useState<Blob | null>(null)
   const [meta, setMeta] = useState<InpaintingResultMeta | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [photoLoading, setPhotoLoading] = useState(true)
   const booted = useRef(false)
-  const adapterChoice = useMemo(() => createInpaintingAdapter(), [])
+  const flight = useRef(false)
   const resultUrl = useObjectUrl(resultBlob)
   const beforeUrl = useObjectUrl(beforeBlob)
   const thumbs = useGenerationThumbs(generations)
   const product = productId ? findProduct(productId) : undefined
+  const surface: Surface = surfaceOverride ?? product?.surface ?? editSurface
+  const activeMask = surface === "FLOOR" ? floorMask : wallMask
+  const photoKey = canvas ? `${projectId}:${canvas.width}x${canvas.height}` : ""
   useTitle(project ? project.name : "Simulação")
 
   useEffect(() => {
@@ -97,28 +115,49 @@ export function SimulatePage() {
   useEffect(() => {
     if (photoLoading || booted.current || !studio.ready) return
     booted.current = true
-    const requested = (location.state as { start?: StepId } | null)?.start
+    const requested = normalizeStart((location.state as { start?: string } | null)?.start)
     if (!canvas) {
       setStep("photo")
       return
     }
-    if (requested === "photo" || requested === "surface" || requested === "product" || requested === "mask") {
-      setStep(requested === "photo" ? "photo" : requested)
-      return
-    }
-    setStep("surface")
+    setStep(requested ?? "detect")
   }, [photoLoading, canvas, studio.ready, location.state])
 
   useEffect(() => {
-    if (step !== "mask" || !canvas || !surface || mask) return
-    setMask(autoMask(canvas.width, canvas.height, surface))
-    setConfirmed(false)
-  }, [step, canvas, surface, mask])
+    if (step !== "detect" || !canvas || !photoKey || detectedFor === photoKey || flight.current) return
+    let cancelled = false
+    flight.current = true
+    setDetecting(true)
+    setDetectError(null)
+    void detectRoom(canvas)
+      .then((result) => {
+        if (cancelled) return
+        setFloorMask(result.floor)
+        setWallMask(result.wall)
+        setDepth(result.depth)
+        setDepthModel(result.depthModel)
+        setMaskSource(result.source)
+        setDetectedFor(photoKey)
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return
+        setDetectError(reason instanceof Error ? reason.message : "A detecção falhou.")
+        setDetectedFor(photoKey)
+      })
+      .finally(() => {
+        flight.current = false
+        if (!cancelled) setDetecting(false)
+      })
+    return () => {
+      cancelled = true
+      flight.current = false
+    }
+  }, [step, canvas, photoKey, detectedFor])
 
   useEffect(() => {
-    if (step !== "result" || resultBlob || generations.length === 0) return
+    if (step !== "preview" || resultBlob || generations.length === 0) return
     void showSaved(generations[0]!.id)
-    // showSaved reads the latest list when the result step opens without a fresh render.
+    // showSaved reads the latest list when the preview opens without a fresh render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
 
@@ -127,8 +166,13 @@ export function SimulatePage() {
     setCanvas(next)
     setPreviewBlob(blob)
     setPhotoNote(note)
-    setMask(null)
-    setConfirmed(false)
+    setFloorMask(null)
+    setWallMask(null)
+    setDepth(null)
+    setDepthModel(null)
+    setMaskSource(null)
+    setDetectedFor(null)
+    setDetectError(null)
     setResultBlob(null)
     setError(null)
     if (project) {
@@ -161,12 +205,27 @@ export function SimulatePage() {
     }
   }
 
-  function chooseSurface(next: Surface) {
-    setSurface(next)
-    setMask(null)
-    setConfirmed(false)
-    setProductId(null)
-    setError(null)
+  function applyGeometric() {
+    if (!canvas) return
+    setFloorMask(autoMask(canvas.width, canvas.height, "FLOOR"))
+    setWallMask(autoMask(canvas.width, canvas.height, "WALL"))
+    setDepth(null)
+    setDepthModel(null)
+    setMaskSource({
+      provider: "geometric",
+      model: GEOMETRIC_MASK_MODEL,
+      configured: false,
+      note: pipeline?.segmentation.configured
+        ? "Recorte geométrico escolhido manualmente. Não é SegFormer."
+        : "Recorte geométrico. Não é segmentação SegFormer.",
+    })
+    setDetectError(null)
+    setDetectedFor(photoKey)
+  }
+
+  function updateEditedMask(next: Uint8Array) {
+    if (editSurface === "FLOOR") setFloorMask(next)
+    else setWallMask(next)
   }
 
   async function showSaved(id: string) {
@@ -185,62 +244,67 @@ export function SimulatePage() {
       })
     }
     setActiveId(id)
-    setStep("result")
+    setStep("preview")
   }
 
   async function generate() {
-    if (!canvas || !surface || !product || !mask || !project || generating) return
-    if (!confirmed) {
-      setError("Confirme a máscara antes de gerar.")
-      return
-    }
+    if (!canvas || !product || !floorMask || !wallMask || !project || generating) return
+    const appliedSurface = surfaceOverride ?? product.surface
+    const mask = appliedSurface === "FLOOR" ? floorMask : wallMask
     if (maskCoverage(mask) < 0.01) {
-      setError("Marque a área que deve mudar.")
+      setError("A máscara desta superfície está vazia.")
       return
     }
     setGenerating(true)
     setError(null)
+    setPolishNote(null)
     try {
-      await delay(40)
-      const technicalPrompt = buildTechnicalPrompt(surface, productToInput(product))
-      const { image, meta: nextMeta } = await adapterChoice.adapter.generate(
-        {
-          width: canvas.width,
-          height: canvas.height,
-          surface,
-          product: productToInput(product),
-          technicalPrompt,
-          mask,
-        },
-        canvas,
-      )
+      const applied = { ...product, surface: appliedSurface }
+      const preview = await renderPreview({
+        source: canvas,
+        mask,
+        product: applied,
+        depth,
+        segmentationProvider: maskSource?.provider ?? "geometric",
+        segmentationModel: maskSource?.model ?? GEOMETRIC_MASK_MODEL,
+        onPhase: setPhase,
+      })
       const original = await canvasToBlob(canvas)
       const id = crypto.randomUUID()
+      const technicalPrompt = preview.technicalPrompt
       await putBlob(keys.original(id), original)
-      await putBlob(keys.result(id), image)
+      await putBlob(keys.result(id), preview.blob)
       await studioDb.addGeneration({
         id,
         projectId: project.id,
-        surface,
+        surface: appliedSurface,
         productId: product.id,
         productName: product.name,
         productSku: product.sku,
         createdAt: new Date().toISOString(),
         status: "SUCCEEDED",
-        provider: nextMeta.provider,
-        model: nextMeta.model,
-        processingMs: nextMeta.processingMs,
-        estimatedCostBrl: nextMeta.estimatedCostBrl,
+        provider: preview.provider,
+        model: preview.model,
+        processingMs: preview.processingMs,
+        estimatedCostBrl: preview.estimatedCostBrl,
         technicalPrompt,
       })
       setBeforeBlob(original)
-      setResultBlob(image)
-      setMeta(nextMeta)
+      setResultBlob(preview.blob)
+      setPolishNote(preview.polishNote)
+      setMeta({
+        provider: preview.provider,
+        model: preview.model,
+        processingMs: preview.processingMs,
+        estimatedCostBrl: preview.estimatedCostBrl,
+        technicalPrompt,
+        retryCount: 0,
+      })
       setActiveId(id)
-      setStep("result")
-      toast.success("Versão salva no projeto.")
+      setStep("preview")
+      toast.success("Prévia salva no projeto.")
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "A geração falhou.")
+      setError(reason instanceof Error ? reason.message : "A prévia falhou.")
     } finally {
       setGenerating(false)
     }
@@ -248,10 +312,9 @@ export function SimulatePage() {
 
   function openStep(next: StepId) {
     if (next === "photo") setStep("photo")
-    else if (next === "surface" && canvas) setStep("surface")
-    else if (next === "product" && canvas && surface) setStep("product")
-    else if (next === "mask" && canvas && surface && product) setStep("mask")
-    else if (next === "result" && (resultBlob || generations.length > 0)) setStep("result")
+    else if (next === "detect" && canvas) setStep("detect")
+    else if (next === "product" && canvas && floorMask && wallMask) setStep("product")
+    else if (next === "preview" && (resultBlob || generations.length > 0)) setStep("preview")
   }
 
   if (!studio.ready || photoLoading) {
@@ -269,7 +332,8 @@ export function SimulatePage() {
     )
   }
 
-  const coverage = mask ? maskCoverage(mask) : 0
+  const editedMask = editSurface === "FLOOR" ? floorMask : wallMask
+  const coverage = activeMask ? maskCoverage(activeMask) : 0
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-6">
@@ -284,25 +348,24 @@ export function SimulatePage() {
           {STEPS.map((item, index) => {
             const enabled =
               item.id === "photo" ||
-              (item.id === "surface" && Boolean(canvas)) ||
-              (item.id === "product" && Boolean(canvas && surface)) ||
-              (item.id === "mask" && Boolean(canvas && surface && product)) ||
-              (item.id === "result" && Boolean(resultBlob || generations.length > 0))
+              (item.id === "detect" && Boolean(canvas)) ||
+              (item.id === "product" && Boolean(canvas && floorMask && wallMask)) ||
+              (item.id === "preview" && Boolean(resultBlob || generations.length > 0))
             return (
-            <li key={item.id}>
-              <button
-                type="button"
-                disabled={!enabled}
-                onClick={() => openStep(item.id)}
-                className={cn(
-                  "rounded-full px-3 py-1.5 text-sm whitespace-nowrap disabled:opacity-40",
-                  step === item.id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
-                )}
-              >
-                <span className="mr-1 tabular-nums">{index + 1}</span>
-                {item.label}
-              </button>
-            </li>
+              <li key={item.id}>
+                <button
+                  type="button"
+                  disabled={!enabled}
+                  onClick={() => openStep(item.id)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-sm whitespace-nowrap disabled:opacity-40",
+                    step === item.id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground",
+                  )}
+                >
+                  <span className="mr-1 tabular-nums">{index + 1}</span>
+                  {item.label}
+                </button>
+              </li>
             )
           })}
         </ol>
@@ -318,38 +381,79 @@ export function SimulatePage() {
               onSample={() => void onSample()}
             />
           ) : null}
-          {step !== "photo" && step !== "mask" && step !== "result" && previewUrl ? (
+          {step === "product" && previewUrl ? (
             <img src={previewUrl} alt="Ambiente do cliente" className="w-full rounded-2xl bg-muted object-contain" />
           ) : null}
-          {step === "mask" && canvas && mask && surface ? (
+          {step === "detect" && canvas && editedMask ? (
             <MaskEditor
               source={canvas}
               width={canvas.width}
               height={canvas.height}
-              surface={surface}
-              mask={mask}
-              onChange={(next) => {
-                setMask(next)
-                setConfirmed(false)
+              surface={editSurface}
+              mask={editedMask}
+              showOverlay={showMask}
+              hint={
+                maskSource
+                  ? `${maskSource.model}. O pincel só ajusta a máscara; não troca o modelo.`
+                  : "A detecção ainda não terminou."
+              }
+              onChange={updateEditedMask}
+              onRedetect={() => {
+                setDetectedFor(null)
+                setDetectError(null)
               }}
+              redetectLabel="Detectar de novo"
             />
           ) : null}
-          {step === "result" && beforeUrl && resultUrl ? (
-            <BeforeAfterSlider before={beforeUrl} after={resultUrl} />
+          {step === "detect" && canvas && !editedMask ? (
+            <div className="grid min-h-72 place-items-center rounded-2xl border border-dashed px-6 text-center text-sm text-muted-foreground">
+              {detecting ? "Lendo piso e parede…" : "A máscara ainda não está pronta."}
+            </div>
           ) : null}
-          {step === "result" && (!beforeUrl || !resultUrl) ? (
+          {step === "preview" && beforeUrl && resultUrl ? (
+            <div className="relative">
+              <BeforeAfterSlider before={beforeUrl} after={resultUrl} />
+              {showMask && activeMask && canvas ? (
+                <MaskOverlay mask={activeMask} width={canvas.width} height={canvas.height} />
+              ) : null}
+            </div>
+          ) : null}
+          {step === "preview" && (!beforeUrl || !resultUrl) ? (
             <div className="grid min-h-72 place-items-center rounded-2xl border border-dashed text-sm text-muted-foreground">
-              {generations.length === 0 ? "Gere uma versão para comparar." : "Carregando a comparação…"}
+              {generations.length === 0 ? "Gere uma prévia para comparar." : "Carregando a comparação…"}
             </div>
           ) : null}
           {generating ? (
             <div className="absolute inset-0 grid place-items-center rounded-2xl bg-background/80 px-6 text-center">
-              <p className="font-display text-3xl">Aplicando o produto na área mascarada…</p>
+              <p className="font-display text-3xl">{phase}</p>
             </div>
           ) : null}
         </section>
 
         <aside className="space-y-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:sticky lg:top-20 lg:max-h-[calc(100svh-6rem)] lg:overflow-auto">
+          <PipelineSummary
+            segmentationModel={
+              maskSource?.model ??
+              (pipeline?.segmentation.configured
+                ? pipeline.segmentation.model
+                : "defina HF_TOKEN ou REPLICATE_API_TOKEN")
+            }
+            segmentationProvider={maskSource?.provider ?? pipeline?.segmentation.provider ?? "unconfigured"}
+            polishModel={pipeline?.polish.model ?? "…"}
+            polishConfigured={Boolean(pipeline?.polish.configured)}
+            depthModel={depthModel}
+            openaiUnused={Boolean(pipeline?.openaiUnused)}
+            note={maskSource?.note ?? null}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showMask}
+              onChange={(event) => setShowMask(event.target.checked)}
+            />
+            Máscara de depuração
+          </label>
+
           {step === "photo" ? (
             <>
               <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Foto</p>
@@ -357,107 +461,115 @@ export function SimulatePage() {
               <p className="text-sm text-muted-foreground">
                 JPEG, PNG ou WEBP até 10 MB. A proporção é mantida e o lado maior não passa de 2048 px.
               </p>
-              <Button className="h-11 w-full" disabled={!canvas} onClick={() => setStep("surface")}>
-                Continuar
+              <Button className="h-11 w-full" disabled={!canvas} onClick={() => setStep("detect")}>
+                Detectar piso e parede
               </Button>
             </>
           ) : null}
 
-          {step === "surface" ? (
+          {step === "detect" ? (
             <>
-              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Superfície</p>
-              <h2 className="font-display text-3xl">O que vai mudar</h2>
-              <SurfaceSelector value={surface} onChange={chooseSurface} />
+              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Detecção</p>
+              <h2 className="font-display text-3xl">Piso e parede</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {(["FLOOR", "WALL"] as const).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-pressed={editSurface === item}
+                    onClick={() => setEditSurface(item)}
+                    className={cn(
+                      "rounded-xl bg-secondary px-3 py-2 text-left text-sm",
+                      editSurface === item && "ring-2 ring-pine",
+                    )}
+                  >
+                    <span className="block font-medium">{surfaceLabel(item)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatPercent(maskCoverage(item === "FLOOR" ? (floorMask ?? new Uint8Array()) : (wallMask ?? new Uint8Array())))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {detecting ? <p className="text-sm text-muted-foreground">Consultando o modelo de segmentação…</p> : null}
+              {detectError ? <p className="text-sm text-destructive">{detectError}</p> : null}
+              <Button type="button" variant="outline" className="h-10 w-full" onClick={applyGeometric}>
+                Usar recorte geométrico
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                O recorte geométrico é um trapézio fixo. Ele não é SegFormer e não é apresentado como IA.
+              </p>
               <div className="flex gap-2">
                 <Button variant="outline" className="h-10" onClick={() => setStep("photo")}>
                   Voltar
                 </Button>
-                <Button className="h-10 flex-1" disabled={!surface} onClick={() => setStep("product")}>
-                  Continuar
+                <Button
+                  className="h-10 flex-1"
+                  disabled={!floorMask || !wallMask || detecting}
+                  onClick={() => setStep("product")}
+                >
+                  Escolher produto
                 </Button>
               </div>
             </>
           ) : null}
 
-          {step === "product" && surface ? (
+          {step === "product" ? (
             <>
               <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Produto</p>
-              <h2 className="font-display text-3xl">
-                {surface === "FLOOR" ? "Pisos e porcelanatos" : "Tintas e revestimentos"}
-              </h2>
+              <h2 className="font-display text-3xl">Catálogo</h2>
+              <p className="text-sm text-muted-foreground">
+                A superfície segue o SKU. A textura do arquivo entra na máscara, com perspectiva e a luz da foto.
+              </p>
+              {product ? (
+                <p className="text-sm">
+                  {product.name} · {surfaceLabel(surface)} · {formatPercent(coverage)} da foto
+                </p>
+              ) : null}
+              {product ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 w-full"
+                  onClick={() => setSurfaceOverride(surface === "FLOOR" ? "WALL" : "FLOOR")}
+                >
+                  Usar a máscara de {surface === "FLOOR" ? "parede" : "piso"}
+                </Button>
+              ) : null}
               <ProductPicker
-                surface={surface}
                 selectedId={productId}
                 onSelect={(next) => {
                   setProductId(next.id)
+                  setSurfaceOverride(null)
+                  setEditSurface(next.surface)
                   setError(null)
                 }}
               />
               <div className="flex gap-2">
-                <Button variant="outline" className="h-10" onClick={() => setStep("surface")}>
+                <Button variant="outline" className="h-10" onClick={() => setStep("detect")}>
                   Voltar
                 </Button>
-                <Button className="h-10 flex-1" disabled={!product} onClick={() => setStep("mask")}>
-                  Continuar
+                <Button className="h-10 flex-1" disabled={!product || generating} onClick={() => void generate()}>
+                  {generating ? "Gerando…" : "Ver prévia"}
                 </Button>
               </div>
             </>
           ) : null}
 
-          {step === "mask" && surface && product ? (
+          {step === "preview" ? (
             <>
-              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Máscara</p>
-              <h2 className="font-display text-3xl">Conferir a área</h2>
-              <p className="text-sm text-muted-foreground">
-                {surfaceLabel(surface)} com {product.name}. A geração só altera o que estiver marcado.
-              </p>
-              <p className="text-sm">{formatPercent(coverage)} da imagem marcada.</p>
-              {confirmed ? (
-                <p className="text-sm text-pine">Máscara confirmada. Pode gerar.</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">Confirme a máscara antes de gerar.</p>
-              )}
-              {adapterChoice.notice ? <p className="text-xs text-muted-foreground">{adapterChoice.notice}</p> : null}
-              <Button
-                type="button"
-                className="h-10 w-full bg-pine text-white hover:bg-pine/90"
-                disabled={coverage < 0.01}
-                onClick={() => {
-                  setConfirmed(true)
-                  setError(null)
-                }}
-              >
-                Confirmar máscara
-              </Button>
-              <Button
-                type="button"
-                className="h-11 w-full bg-clay text-white hover:bg-clay/90"
-                disabled={!confirmed || generating || coverage < 0.01}
-                onClick={() => void generate()}
-              >
-                {generating ? "Gerando…" : "Gerar simulação"}
-              </Button>
-              <Button variant="outline" className="h-10 w-full" onClick={() => setStep("product")}>
-                Voltar ao produto
-              </Button>
-            </>
-          ) : null}
-
-          {step === "result" ? (
-            <>
-              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Resultado</p>
+              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Prévia</p>
               <h2 className="font-display text-3xl">Antes e depois</h2>
               {meta ? (
                 <p className="text-xs text-muted-foreground">
-                  {providerLabel(meta.provider)} · {meta.model} · {meta.processingMs} ms ·{" "}
-                  {formatBrl(meta.estimatedCostBrl)}
+                  {providerLabel(meta.provider)} · {meta.model} · {meta.processingMs} ms · {formatBrl(meta.estimatedCostBrl)}
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">Arraste o controle para comparar.</p>
               )}
+              {polishNote ? <p className="text-sm text-muted-foreground">{polishNote}</p> : null}
               {meta ? (
                 <details className="text-sm">
-                  <summary className="cursor-pointer">Prompt técnico</summary>
+                  <summary className="cursor-pointer">Prompt do polimento</summary>
                   <p className="mt-2 text-muted-foreground">{meta.technicalPrompt}</p>
                 </details>
               ) : null}
@@ -465,7 +577,7 @@ export function SimulatePage() {
                 <Button variant="outline" className="h-10" onClick={() => setStep("product")}>
                   Trocar produto
                 </Button>
-                <Button variant="outline" className="h-10" onClick={() => setStep("mask")}>
+                <Button variant="outline" className="h-10" onClick={() => setStep("detect")}>
                   Ajustar máscara
                 </Button>
                 <Button className="h-10" asChild>
@@ -489,5 +601,36 @@ export function SimulatePage() {
         </aside>
       </div>
     </main>
+  )
+}
+
+function PipelineSummary({
+  segmentationModel,
+  segmentationProvider,
+  polishModel,
+  polishConfigured,
+  depthModel,
+  openaiUnused,
+  note,
+}: {
+  segmentationModel: string
+  segmentationProvider: string
+  polishModel: string
+  polishConfigured: boolean
+  depthModel: string | null
+  openaiUnused: boolean
+  note: string | null
+}) {
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>
+        Segmentação: {providerLabel(segmentationProvider)} · {segmentationModel}
+      </p>
+      <p>Material: {PERSPECTIVE_WARP_MODEL}</p>
+      <p>Polimento: {polishConfigured ? polishModel : "Flux Fill não configurado"}</p>
+      {depthModel ? <p>Profundidade: {depthModel}</p> : null}
+      {openaiUnused ? <p>OPENAI_API_KEY está presente e não entra neste fluxo.</p> : null}
+      {note ? <p>{note}</p> : null}
+    </div>
   )
 }

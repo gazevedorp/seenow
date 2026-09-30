@@ -1,31 +1,32 @@
 import { useMemo, useState } from "react"
-import { CATEGORY_LABEL, type CatalogProduct, type ProductCategory, type Surface } from "@seenow/shared"
+import {
+  CATEGORY_LABEL,
+  PRODUCT_CATEGORIES,
+  surfaceLabel,
+  type CatalogProduct,
+  type ProductCategory,
+  type Surface,
+} from "@seenow/shared"
 import { cn } from "cn"
 import { Input } from "@/components/ui/input"
 import { ProductSwatch } from "@/components/catalog/ProductSwatch"
 import { categoryLabel, filterCatalog } from "@/lib/catalog"
 
-const FILTERS: Array<ProductCategory | "ALL"> = [
-  "ALL",
-  "PISOS",
-  "PORCELANATOS",
-  "REVESTIMENTOS",
-  "TINTAS",
-]
+const FILTERS: Array<ProductCategory | "ALL"> = ["ALL", ...PRODUCT_CATEGORIES]
 
 export function ProductPicker({
   surface,
   selectedId,
   onSelect,
 }: {
-  surface: Surface
+  surface?: Surface | null
   selectedId: string | null
   onSelect: (product: CatalogProduct) => void
 }) {
   const [query, setQuery] = useState("")
   const [category, setCategory] = useState<ProductCategory | "ALL">("ALL")
   const products = useMemo(
-    () => filterCatalog({ query, category, surface }),
+    () => filterCatalog({ query, category, surface: surface ?? undefined }),
     [query, category, surface],
   )
 
@@ -70,15 +71,14 @@ export function ProductPicker({
                   selected && "ring-2 ring-pine",
                 )}
               >
-                <ProductSwatch product={product} surface={surface} />
+                <ProductSwatch product={product} />
                 <div className="space-y-0.5 p-2.5">
                   <p className="text-sm font-medium">{product.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {product.brand} · {product.sku}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {categoryLabel(product.category)}
-                    {product.hex ? ` · ${product.hex}` : ""}
+                    {surfaceLabel(product.surface)} · {categoryLabel(product.category)}
                   </p>
                 </div>
               </button>

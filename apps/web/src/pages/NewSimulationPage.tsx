@@ -77,7 +77,7 @@ export function NewSimulationPage() {
         project.hasPhoto = true
       }
       await studioDb.addProject(project)
-      navigate(`/simular/${project.id}`, { state: { start: useSample ? "surface" : "photo" } })
+      navigate(`/simular/${project.id}`, { state: { start: useSample ? "detect" : "photo" } })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível criar a simulação.")
       setPending(false)

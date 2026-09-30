@@ -3,11 +3,12 @@ import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { seenowPipelinePlugin } from './vite-plugin-pipeline.ts'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), seenowPipelinePlugin()],
   resolve: {
     alias: {
       '@': resolve(root, 'src'),
