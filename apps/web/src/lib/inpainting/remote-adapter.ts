@@ -4,6 +4,7 @@ import type {
   InpaintingRequest,
   InpaintingResultMeta,
 } from "@seenow/shared"
+import { clipBlobToMask } from "@/lib/clip-mask"
 import { canvasToBlob, maskToPng } from "@/lib/images"
 
 const FRONT_TIMEOUT_MS = 170_000
@@ -66,7 +67,7 @@ export class RemoteInpaintingAdapter implements InpaintingAdapter<HTMLCanvasElem
       throw new Error("A API não devolveu uma imagem.")
     }
     return {
-      image,
+      image: await clipBlobToMask(source, image, request.mask),
       meta: {
         provider: this.name,
         model: response.headers.get("x-seenow-model") ?? "remote",
