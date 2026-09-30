@@ -27,6 +27,7 @@ export function formatPercent(fraction: number): string {
 
 export function providerLabel(provider: string): string {
   if (provider === "mock") return "Simulação local"
+  if (provider === "heuristic") return "Estimativa da foto"
   if (provider === "openai") return "OpenAI"
   if (provider === "replicate") return "Replicate"
   return provider

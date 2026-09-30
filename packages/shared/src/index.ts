@@ -20,6 +20,16 @@ export type TextureKind = "wood" | "marble" | "concrete" | "stone" | "paint";
 
 export type InpaintingProviderId = "mock" | "openai" | "replicate";
 
+/** Phase 1 providers. `heuristic` is the on-device photo estimate. */
+export type SegmentationProviderId = "replicate" | "openai" | "heuristic";
+
+export interface SegmentationMeta {
+  provider: string;
+  model: string;
+  processingMs: number;
+  retryCount: number;
+}
+
 export const MAX_ENV_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_ENV_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
 export const MAX_LONG_EDGE_PX = 2048;

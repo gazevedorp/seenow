@@ -34,13 +34,14 @@ function drawWood(
   surface: Surface,
   width: number,
   height: number,
+  horizon: number,
 ) {
   context.fillStyle = source.hex ?? "#C4A06A"
   context.fillRect(0, 0, width, height)
   context.strokeStyle = source.accentHex
   context.globalAlpha = 0.45
   if (surface === "FLOOR") {
-    const vanishY = height * (FLOOR_HORIZON - 0.12)
+    const vanishY = height * Math.max(0.05, horizon - 0.08)
     const vanishX = width * 0.5
     context.lineWidth = Math.max(1, width * 0.002)
     for (let i = 1; i <= 16; i++) {
@@ -162,9 +163,10 @@ export function drawTexture(
   surface: Surface,
   width: number,
   height: number,
+  horizon = FLOOR_HORIZON,
 ) {
   if (source.texture === "paint") drawPaint(context, source, width, height)
-  else if (source.texture === "wood") drawWood(context, source, surface, width, height)
+  else if (source.texture === "wood") drawWood(context, source, surface, width, height, horizon)
   else if (source.texture === "marble") drawMarble(context, source, width, height)
   else if (source.texture === "concrete") drawConcrete(context, source, width, height)
   else drawStone(context, source, width, height)

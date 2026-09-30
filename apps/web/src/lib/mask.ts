@@ -9,8 +9,27 @@ export const SAMPLE_WINDOW = {
   h: 0.34,
 } as const
 
-export function createMask(width: number, height: number): Uint8Array {
-  return new Uint8Array(width * height)
+/** First strong row of a floor mask, or the bottom of a wall mask, as a fraction of height. */
+export function maskHorizonRatio(mask: Uint8Array, width: number, height: number, surface: Surface): number {
+  const minRun = Math.max(4, Math.round(width * 0.08))
+  const rowCount = (y: number) => {
+    let count = 0
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      if ((mask[row + x] ?? 0) >= 128) count += 1
+    }
+    return count
+  }
+  if (surface === "FLOOR") {
+    for (let y = 0; y < height; y++) {
+      if (rowCount(y) >= minRun) return y / height
+    }
+  } else {
+    for (let y = height - 1; y >= 0; y--) {
+      if (rowCount(y) >= minRun) return (y + 1) / height
+    }
+  }
+  return FLOOR_HORIZON
 }
 
 export function maskCoverage(mask: Uint8Array): number {
@@ -20,55 +39,6 @@ export function maskCoverage(mask: Uint8Array): number {
     if (mask[i]! >= 128) marked += 1
   }
   return marked / mask.length
-}
-
-function fillRect(
-  mask: Uint8Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  value: number,
-) {
-  const x0 = Math.max(0, Math.round(x))
-  const y0 = Math.max(0, Math.round(y))
-  const x1 = Math.min(width, Math.round(x + w))
-  const y1 = Math.min(height, Math.round(y + h))
-  for (let yy = y0; yy < y1; yy++) {
-    mask.fill(value, yy * width + x0, yy * width + x1)
-  }
-}
-
-export function autoMask(width: number, height: number, surface: Surface): Uint8Array {
-  const mask = createMask(width, height)
-  const floorTop = Math.round(height * FLOOR_HORIZON)
-  if (surface === "FLOOR") {
-    const inset = Math.round(width * 0.04)
-    for (let y = floorTop; y < height; y++) {
-      const t = (y - floorTop) / Math.max(1, height - floorTop)
-      const left = Math.round(inset * (1 - t))
-      const right = width - left
-      mask.fill(255, y * width + left, y * width + right)
-    }
-    return mask
-  }
-
-  fillRect(mask, width, height, 0, 0, width, floorTop, 255)
-  const baseboard = Math.max(8, Math.round(height * 0.018))
-  fillRect(mask, width, height, 0, floorTop - baseboard, width, baseboard, 0)
-  fillRect(
-    mask,
-    width,
-    height,
-    width * SAMPLE_WINDOW.x,
-    height * SAMPLE_WINDOW.y,
-    width * SAMPLE_WINDOW.w,
-    height * SAMPLE_WINDOW.h,
-    0,
-  )
-  return mask
 }
 
 export function stampMask(

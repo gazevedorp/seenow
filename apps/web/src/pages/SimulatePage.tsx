@@ -5,6 +5,7 @@ import {
   productToInput,
   surfaceLabel,
   type InpaintingResultMeta,
+  type SegmentationMeta,
   type Surface,
 } from "@seenow/shared"
 import { toast } from "sonner"
@@ -21,7 +22,8 @@ import { getBlob, keys, putBlob, studioDb, useStudio } from "@/lib/db"
 import { delay, formatBrl, formatPercent, providerLabel } from "@/lib/format"
 import { blobToCanvas, canvasToBlob, fileToWorkingCanvas } from "@/lib/images"
 import { createInpaintingAdapter } from "@/lib/inpainting/create-adapter"
-import { autoMask, maskCoverage } from "@/lib/mask"
+import { maskCoverage } from "@/lib/mask"
+import { segmentRoom } from "@/lib/segmentation/segment-room"
 import { renderSampleRoom } from "@/lib/sample-room"
 import { useObjectUrl } from "@/lib/use-object-url"
 import { useGenerationThumbs } from "@/lib/use-generation-media"
@@ -30,8 +32,8 @@ import { useTitle } from "@/lib/use-title"
 const STEPS = [
   { id: "photo", label: "Foto" },
   { id: "surface", label: "Superfície" },
+  { id: "mask", label: "Região" },
   { id: "product", label: "Produto" },
-  { id: "mask", label: "Máscara" },
   { id: "result", label: "Resultado" },
 ] as const
 
@@ -60,6 +62,10 @@ export function SimulatePage() {
   const [productId, setProductId] = useState<string | null>(null)
   const [mask, setMask] = useState<Uint8Array | null>(null)
   const [confirmed, setConfirmed] = useState(false)
+  const [segmenting, setSegmenting] = useState(false)
+  const [segmentNote, setSegmentNote] = useState<string | null>(null)
+  const [segmentMeta, setSegmentMeta] = useState<SegmentationMeta | null>(null)
+  const [aiLabel, setAiLabel] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultBlob, setResultBlob] = useState<Blob | null>(null)
@@ -68,6 +74,7 @@ export function SimulatePage() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [photoLoading, setPhotoLoading] = useState(true)
   const booted = useRef(false)
+  const segmentToken = useRef(0)
   const adapterChoice = useMemo(() => createInpaintingAdapter(), [])
   const resultUrl = useObjectUrl(resultBlob)
   const beforeUrl = useObjectUrl(beforeBlob)
@@ -110,10 +117,19 @@ export function SimulatePage() {
   }, [photoLoading, canvas, studio.ready, location.state])
 
   useEffect(() => {
-    if (step !== "mask" || !canvas || !surface || mask) return
-    setMask(autoMask(canvas.width, canvas.height, surface))
-    setConfirmed(false)
-  }, [step, canvas, surface, mask])
+    let cancelled = false
+    void fetch("/api/ai-status")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { segmentation?: { label?: string }; inpainting?: { label?: string } } | null) => {
+        if (cancelled || !payload) return
+        const parts = [payload.segmentation?.label, payload.inpainting?.label].filter(Boolean)
+        setAiLabel(parts.join(" · "))
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (step !== "result" || resultBlob || generations.length === 0) return
@@ -127,8 +143,12 @@ export function SimulatePage() {
     setCanvas(next)
     setPreviewBlob(blob)
     setPhotoNote(note)
+    segmentToken.current += 1
     setMask(null)
     setConfirmed(false)
+    setSegmenting(false)
+    setSegmentNote(null)
+    setSegmentMeta(null)
     setResultBlob(null)
     setError(null)
     if (project) {
@@ -161,12 +181,34 @@ export function SimulatePage() {
     }
   }
 
+  async function ensureSegment(nextSurface: Surface, source: HTMLCanvasElement, fresh = false) {
+    const token = ++segmentToken.current
+    setSegmenting(true)
+    setError(null)
+    try {
+      const result = await segmentRoom(source, nextSurface, { fresh })
+      if (token !== segmentToken.current) return
+      setMask(result.mask)
+      setSegmentMeta(result.meta)
+      setSegmentNote(result.note)
+      setConfirmed(maskCoverage(result.mask) >= 0.01)
+    } catch (reason) {
+      if (token !== segmentToken.current) return
+      setError(reason instanceof Error ? reason.message : "Não foi possível marcar a região.")
+    } finally {
+      if (token === segmentToken.current) setSegmenting(false)
+    }
+  }
+
   function chooseSurface(next: Surface) {
     setSurface(next)
     setMask(null)
     setConfirmed(false)
+    setSegmentNote(null)
+    setSegmentMeta(null)
     setProductId(null)
     setError(null)
+    if (canvas) void ensureSegment(next, canvas)
   }
 
   async function showSaved(id: string) {
@@ -191,7 +233,7 @@ export function SimulatePage() {
   async function generate() {
     if (!canvas || !surface || !product || !mask || !project || generating) return
     if (!confirmed) {
-      setError("Confirme a máscara antes de gerar.")
+      setError("Confirme a região antes de gerar.")
       return
     }
     if (maskCoverage(mask) < 0.01) {
@@ -246,11 +288,17 @@ export function SimulatePage() {
     }
   }
 
+  function goToMask() {
+    if (!canvas || !surface) return
+    setStep("mask")
+    if (!mask && !segmenting) void ensureSegment(surface, canvas)
+  }
+
   function openStep(next: StepId) {
     if (next === "photo") setStep("photo")
     else if (next === "surface" && canvas) setStep("surface")
-    else if (next === "product" && canvas && surface) setStep("product")
-    else if (next === "mask" && canvas && surface && product) setStep("mask")
+    else if (next === "mask" && canvas && surface) goToMask()
+    else if (next === "product" && canvas && surface && confirmed) setStep("product")
     else if (next === "result" && (resultBlob || generations.length > 0)) setStep("result")
   }
 
@@ -285,8 +333,8 @@ export function SimulatePage() {
             const enabled =
               item.id === "photo" ||
               (item.id === "surface" && Boolean(canvas)) ||
-              (item.id === "product" && Boolean(canvas && surface)) ||
-              (item.id === "mask" && Boolean(canvas && surface && product)) ||
+              (item.id === "mask" && Boolean(canvas && surface)) ||
+              (item.id === "product" && Boolean(canvas && surface && confirmed)) ||
               (item.id === "result" && Boolean(resultBlob || generations.length > 0))
             return (
             <li key={item.id}>
@@ -328,11 +376,26 @@ export function SimulatePage() {
               height={canvas.height}
               surface={surface}
               mask={mask}
+              segmenting={segmenting}
+              hint={segmentNote ?? undefined}
+              onResegment={() => void ensureSegment(surface, canvas, true)}
               onChange={(next) => {
                 setMask(next)
                 setConfirmed(false)
               }}
             />
+          ) : null}
+          {step === "mask" && !mask && previewUrl ? (
+            <div className="relative">
+              <img src={previewUrl} alt="Ambiente do cliente" className="w-full rounded-2xl bg-muted object-contain" />
+              {segmenting ? (
+                <div className="absolute inset-0 grid place-items-center rounded-2xl bg-background/75 px-6 text-center">
+                  <p className="font-display text-3xl">
+                    Identificando {surface === "WALL" ? "a parede" : "o piso"}…
+                  </p>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {step === "result" && beforeUrl && resultUrl ? (
             <BeforeAfterSlider before={beforeUrl} after={resultUrl} />
@@ -344,7 +407,7 @@ export function SimulatePage() {
           ) : null}
           {generating ? (
             <div className="absolute inset-0 grid place-items-center rounded-2xl bg-background/80 px-6 text-center">
-              <p className="font-display text-3xl">Aplicando o produto na área mascarada…</p>
+              <p className="font-display text-3xl">Aplicando o produto só na região marcada…</p>
             </div>
           ) : null}
         </section>
@@ -367,13 +430,17 @@ export function SimulatePage() {
             <>
               <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Superfície</p>
               <h2 className="font-display text-3xl">O que vai mudar</h2>
+              <p className="text-sm text-muted-foreground">
+                A região do piso ou da parede é marcada na foto. Não é preciso pintar a área à mão.
+              </p>
               <SurfaceSelector value={surface} onChange={chooseSurface} />
+              {segmenting ? <p className="text-sm text-muted-foreground">Identificando a região na foto…</p> : null}
               <div className="flex gap-2">
                 <Button variant="outline" className="h-10" onClick={() => setStep("photo")}>
                   Voltar
                 </Button>
-                <Button className="h-10 flex-1" disabled={!surface} onClick={() => setStep("product")}>
-                  Continuar
+                <Button className="h-10 flex-1" disabled={!surface} onClick={goToMask}>
+                  Ver região
                 </Button>
               </div>
             </>
@@ -393,52 +460,78 @@ export function SimulatePage() {
                   setError(null)
                 }}
               />
+              <p className="text-sm text-muted-foreground">
+                {formatPercent(coverage)} da foto está na região do {surfaceLabel(surface).toLowerCase()}. A cor entra só aí.
+              </p>
               <div className="flex gap-2">
-                <Button variant="outline" className="h-10" onClick={() => setStep("surface")}>
+                <Button variant="outline" className="h-10" onClick={goToMask}>
                   Voltar
                 </Button>
-                <Button className="h-10 flex-1" disabled={!product} onClick={() => setStep("mask")}>
-                  Continuar
+                <Button
+                  type="button"
+                  className="h-11 flex-1 bg-clay text-white hover:bg-clay/90"
+                  disabled={!product || !confirmed || generating || coverage < 0.01}
+                  onClick={() => void generate()}
+                >
+                  {generating ? "Gerando…" : "Gerar simulação"}
                 </Button>
               </div>
             </>
           ) : null}
 
-          {step === "mask" && surface && product ? (
+          {step === "mask" && surface ? (
             <>
-              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Máscara</p>
-              <h2 className="font-display text-3xl">Conferir a área</h2>
+              <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Região</p>
+              <h2 className="font-display text-3xl">{surface === "FLOOR" ? "Piso marcado" : "Parede marcada"}</h2>
               <p className="text-sm text-muted-foreground">
-                {surfaceLabel(surface)} com {product.name}. A geração só altera o que estiver marcado.
+                {segmentNote ?? "A região é proposta automaticamente. Ajuste com o pincel só se precisar."}
               </p>
-              <p className="text-sm">{formatPercent(coverage)} da imagem marcada.</p>
+              <p className="text-sm">
+                {segmenting && !mask ? "Procurando a região…" : `${formatPercent(coverage)} da imagem marcada.`}
+              </p>
+              {segmentMeta ? (
+                <p className="text-xs text-muted-foreground">
+                  {providerLabel(segmentMeta.provider)} · {segmentMeta.model}
+                </p>
+              ) : null}
+              {aiLabel ? <p className="text-xs text-muted-foreground">{aiLabel}</p> : null}
               {confirmed ? (
-                <p className="text-sm text-pine">Máscara confirmada. Pode gerar.</p>
+                <p className="text-sm text-pine">Região pronta. Pode seguir para o produto.</p>
               ) : (
-                <p className="text-sm text-muted-foreground">Confirme a máscara antes de gerar.</p>
+                <p className="text-sm text-muted-foreground">
+                  {mask ? "Confirme a região ajustada antes de gerar." : "Aguarde a marcação automática."}
+                </p>
               )}
               {adapterChoice.notice ? <p className="text-xs text-muted-foreground">{adapterChoice.notice}</p> : null}
-              <Button
-                type="button"
-                className="h-10 w-full bg-pine text-white hover:bg-pine/90"
-                disabled={coverage < 0.01}
-                onClick={() => {
-                  setConfirmed(true)
-                  setError(null)
-                }}
-              >
-                Confirmar máscara
-              </Button>
-              <Button
-                type="button"
-                className="h-11 w-full bg-clay text-white hover:bg-clay/90"
-                disabled={!confirmed || generating || coverage < 0.01}
-                onClick={() => void generate()}
-              >
-                {generating ? "Gerando…" : "Gerar simulação"}
-              </Button>
-              <Button variant="outline" className="h-10 w-full" onClick={() => setStep("product")}>
-                Voltar ao produto
+              {!confirmed ? (
+                <Button
+                  type="button"
+                  className="h-10 w-full bg-pine text-white hover:bg-pine/90"
+                  disabled={segmenting || coverage < 0.01}
+                  onClick={() => {
+                    setConfirmed(true)
+                    setError(null)
+                  }}
+                >
+                  Confirmar região
+                </Button>
+              ) : null}
+              {product ? (
+                <Button
+                  type="button"
+                  className="h-11 w-full bg-clay text-white hover:bg-clay/90"
+                  disabled={!confirmed || generating || coverage < 0.01}
+                  onClick={() => void generate()}
+                >
+                  {generating ? "Gerando…" : "Gerar simulação"}
+                </Button>
+              ) : (
+                <Button className="h-11 w-full" disabled={!confirmed || segmenting || coverage < 0.01} onClick={() => setStep("product")}>
+                  Escolher produto
+                </Button>
+              )}
+              <Button variant="outline" className="h-10 w-full" onClick={() => setStep("surface")}>
+                Trocar superfície
               </Button>
             </>
           ) : null}
@@ -465,8 +558,8 @@ export function SimulatePage() {
                 <Button variant="outline" className="h-10" onClick={() => setStep("product")}>
                   Trocar produto
                 </Button>
-                <Button variant="outline" className="h-10" onClick={() => setStep("mask")}>
-                  Ajustar máscara
+                <Button variant="outline" className="h-10" onClick={goToMask}>
+                  Ajustar região
                 </Button>
                 <Button className="h-10" asChild>
                   <Link to={`/projetos/${project.id}`}>Ver histórico</Link>

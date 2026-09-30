@@ -4,8 +4,10 @@ import {
   type InpaintingRequest,
   type InpaintingResultMeta,
 } from "@seenow/shared"
+import { compositeMasked } from "@/lib/compose"
 import { delay } from "@/lib/format"
 import { canvasToBlob } from "@/lib/images"
+import { maskHorizonRatio } from "@/lib/mask"
 import { drawTexture, parseColor, relight } from "@/lib/textures"
 
 export { buildTechnicalPrompt }
@@ -40,7 +42,7 @@ export class MockInpaintingAdapter implements InpaintingAdapter<HTMLCanvasElemen
     textureCanvas.height = height
     const textureContext = textureCanvas.getContext("2d", { willReadFrequently: true })
     if (!textureContext) throw new Error("Não foi possível montar a textura.")
-    drawTexture(textureContext, product, surface, width, height)
+    drawTexture(textureContext, product, surface, width, height, maskHorizonRatio(mask, width, height, surface))
     const textureImage = textureContext.getImageData(0, 0, width, height)
 
     const output = document.createElement("canvas")
@@ -48,36 +50,26 @@ export class MockInpaintingAdapter implements InpaintingAdapter<HTMLCanvasElemen
     output.height = height
     const outputContext = output.getContext("2d")
     if (!outputContext) throw new Error("Não foi possível compor o resultado.")
-    const image = outputContext.createImageData(width, height)
+    const painted = new Uint8ClampedArray(sourceImage.data.length)
     const [paintR, paintG, paintB] = parseColor(product.hex, product.accentHex)
     const paint = product.texture === "paint"
 
     for (let index = 0; index < mask.length; index++) {
-      const amount = mask[index] ?? 0
       const offset = index * 4
       const sr = sourceImage.data[offset] ?? 0
       const sg = sourceImage.data[offset + 1] ?? 0
       const sb = sourceImage.data[offset + 2] ?? 0
-      if (amount === 0) {
-        image.data[offset] = sr
-        image.data[offset + 1] = sg
-        image.data[offset + 2] = sb
-        image.data[offset + 3] = 255
-        continue
-      }
       const tr = textureImage.data[offset] ?? 0
       const tg = textureImage.data[offset + 1] ?? 0
       const tb = textureImage.data[offset + 2] ?? 0
-      const br = paint ? (sr * paintR) / 255 : relight(tr, sr)
-      const bg = paint ? (sg * paintG) / 255 : relight(tg, sg)
-      const bb = paint ? (sb * paintB) / 255 : relight(tb, sb)
-      const keep = 255 - amount
-      image.data[offset] = Math.round((sr * keep + br * amount) / 255)
-      image.data[offset + 1] = Math.round((sg * keep + bg * amount) / 255)
-      image.data[offset + 2] = Math.round((sb * keep + bb * amount) / 255)
-      image.data[offset + 3] = 255
+      painted[offset] = paint ? (sr * paintR) / 255 : relight(tr, sr)
+      painted[offset + 1] = paint ? (sg * paintG) / 255 : relight(tg, sg)
+      painted[offset + 2] = paint ? (sb * paintB) / 255 : relight(tb, sb)
+      painted[offset + 3] = 255
     }
 
+    const image = outputContext.createImageData(width, height)
+    image.data.set(compositeMasked(sourceImage.data, painted, mask))
     outputContext.putImageData(image, 0, 0)
     const blob = await canvasToBlob(output, "image/jpeg", 0.92)
     return {

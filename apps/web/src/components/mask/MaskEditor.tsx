@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import type { Surface } from "@seenow/shared"
 import { Button } from "@/components/ui/button"
-import { autoMask, stampLine } from "@/lib/mask"
+import { stampLine } from "@/lib/mask"
 
 function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number, height: number) {
   const context = canvas.getContext("2d")
@@ -26,6 +26,9 @@ export function MaskEditor({
   surface,
   mask,
   onChange,
+  onResegment,
+  segmenting = false,
+  hint,
 }: {
   source: HTMLCanvasElement
   width: number
@@ -33,6 +36,9 @@ export function MaskEditor({
   surface: Surface
   mask: Uint8Array
   onChange: (next: Uint8Array) => void
+  onResegment?: () => void
+  segmenting?: boolean
+  hint?: string
 }) {
   const viewRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -153,77 +159,74 @@ export function MaskEditor({
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "add" ? "default" : "outline"}
-          aria-pressed={tool === "add"}
-          onClick={() => setTool("add")}
-        >
-          Pincel
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "erase" ? "default" : "outline"}
-          aria-pressed={tool === "erase"}
-          onClick={() => setTool("erase")}
-        >
-          Borracha
-        </Button>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          Tamanho
-          <input
-            type="range"
-            min={12}
-            max={72}
-            value={radius}
-            onChange={(event) => setRadius(Number(event.target.value))}
-            aria-label="Tamanho do pincel"
-          />
-        </label>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!canUndo}
-          onClick={() => {
-            const previous = undoRef.current.pop()
-            setCanUndo(undoRef.current.length > 0)
-            if (!previous) return
-            publish(previous)
-          }}
-        >
-          Desfazer
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            remember()
-            publish(autoMask(width, height, surface))
-          }}
-        >
-          Sugerir de novo
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            remember()
-            publish(new Uint8Array(width * height))
-          }}
-        >
-          Limpar
+        <Button type="button" size="sm" variant="outline" disabled={segmenting || !onResegment} onClick={() => onResegment?.()}>
+          {segmenting ? "Identificando…" : "Identificar de novo"}
         </Button>
       </div>
+      <details className="rounded-xl bg-secondary/60 px-3 py-2">
+        <summary className="cursor-pointer text-sm">Ajuste fino (opcional)</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={tool === "add" ? "default" : "outline"}
+            aria-pressed={tool === "add"}
+            onClick={() => setTool("add")}
+          >
+            Pincel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={tool === "erase" ? "default" : "outline"}
+            aria-pressed={tool === "erase"}
+            onClick={() => setTool("erase")}
+          >
+            Borracha
+          </Button>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Tamanho
+            <input
+              type="range"
+              min={12}
+              max={72}
+              value={radius}
+              onChange={(event) => setRadius(Number(event.target.value))}
+              aria-label="Tamanho do pincel"
+            />
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!canUndo}
+            onClick={() => {
+              const previous = undoRef.current.pop()
+              setCanUndo(undoRef.current.length > 0)
+              if (!previous) return
+              publish(previous)
+            }}
+          >
+            Desfazer
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              remember()
+              publish(new Uint8Array(width * height))
+            }}
+          >
+            Limpar
+          </Button>
+        </div>
+      </details>
       <p className="text-xs text-muted-foreground">
-        {surface === "FLOOR"
-          ? "A sugestão cobre o piso. Apague móveis e vasos que não devem mudar."
-          : "A sugestão cobre a parede e reserva a janela de exemplo. Ajuste o quadro se quiser mantê-lo."}{" "}
-        Sugestão local, sem OpenAI nesta fase.
+        {hint ??
+          (surface === "FLOOR"
+            ? "A região do piso já vem marcada. O pincel só corrige o que sobrou."
+            : "A região da parede já vem marcada. O pincel só corrige o que sobrou.")}
       </p>
     </div>
   )
