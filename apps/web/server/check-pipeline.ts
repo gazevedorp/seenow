@@ -26,6 +26,8 @@ import {
   resolvePremiumProviders,
 } from "../../../packages/shared/src/premium.ts"
 import { groupSegmentItems } from "./hf.ts"
+import { ProviderRequestError } from "./retry.ts"
+import { clearReplicateVersionCache, replicatePredict } from "./replicate.ts"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 let failed = 0
@@ -233,6 +235,208 @@ test("catalog ships floor and wall textures", () => {
     assert.ok(existsSync(file), file)
   }
 })
+
+const OLDER = "a".repeat(64)
+const NEWER = "b".repeat(64)
+const COMMUNITY = "simbrams/segformer-b5-finetuned-ade-640-640"
+
+type FetchCall = { url: string; method: string; body: unknown; prefer: string | null }
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
+}
+
+async function withFetch(handler: (call: FetchCall) => Response | Promise<Response>, run: (calls: FetchCall[]) => Promise<void>) {
+  const calls: FetchCall[] = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    const method = init?.method ?? "GET"
+    const headers = new Headers(init?.headers)
+    const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
+    const call = { url, method, body, prefer: headers.get("Prefer") }
+    calls.push(call)
+    return handler(call)
+  }
+  try {
+    clearReplicateVersionCache()
+    await run(calls)
+  } finally {
+    globalThis.fetch = original
+    clearReplicateVersionCache()
+  }
+}
+
+function succeeded(output: unknown = { ok: true }): Response {
+  return jsonResponse(200, { id: "pred_1", status: "succeeded", output })
+}
+
+await (async () => {
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions") && call.method === "GET") {
+          return jsonResponse(200, {
+            results: [
+              { id: OLDER, created_at: "2024-01-01T00:00:00.000Z" },
+              { id: NEWER, created_at: "2025-06-01T00:00:00.000Z" },
+            ],
+          })
+        }
+        if (call.url === "https://api.replicate.com/v1/predictions" && call.method === "POST") return succeeded()
+        return jsonResponse(500, { detail: `unexpected ${call.method} ${call.url}` })
+      },
+      async (calls) => {
+        const output = await replicatePredict("r8_test", COMMUNITY, { image: "data:image/png;base64,QQ==" })
+        assert.deepEqual(output, { ok: true })
+        assert.equal(
+          calls.some((call) => /\/models\/.+\/predictions$/.test(call.url)),
+          false,
+        )
+        const post = calls.find((call) => call.method === "POST")
+        assert.equal(post?.url, "https://api.replicate.com/v1/predictions")
+        assert.equal(post?.prefer, "wait=60")
+        assert.deepEqual(post?.body, {
+          version: `${COMMUNITY}:${NEWER}`,
+          input: { image: "data:image/png;base64,QQ==" },
+        })
+        const before = calls.length
+        await replicatePredict("r8_test", COMMUNITY, { image: "again" })
+        const extra = calls.slice(before)
+        assert.equal(extra.some((call) => call.url.endsWith("/versions")), false)
+        assert.equal(extra.length, 1)
+        assert.equal(extra[0]?.url, "https://api.replicate.com/v1/predictions")
+      },
+    )
+    console.log("ok community replicate predictions use the latest version id")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL community replicate predictions use the latest version id")
+    console.error(error)
+  }
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) return jsonResponse(500, { detail: "versions should be skipped" })
+        if (call.method === "POST") return succeeded("pinned")
+        return jsonResponse(500, { detail: "unexpected" })
+      },
+      async (calls) => {
+        const pin = `${COMMUNITY}:${OLDER}`
+        const output = await replicatePredict("r8_test", pin, { image: "x" })
+        assert.equal(output, "pinned")
+        assert.equal(calls.length, 1)
+        const post = calls[0]
+        assert.ok(post)
+        assert.deepEqual((post.body as { version?: string }).version, pin)
+      },
+    )
+    console.log("ok pinned replicate version skips the versions list")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL pinned replicate version skips the versions list")
+    console.error(error)
+  }
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) return jsonResponse(200, { results: [] })
+        if (call.method === "POST") return succeeded("official")
+        return jsonResponse(500, { detail: "unexpected" })
+      },
+      async (calls) => {
+        const output = await replicatePredict("r8_test", "black-forest-labs/flux-fill-pro", { prompt: "seam" })
+        assert.equal(output, "official")
+        const post = calls.find((call) => call.method === "POST")
+        assert.ok(post)
+        assert.equal(post.url, "https://api.replicate.com/v1/predictions")
+        assert.deepEqual((post.body as { version?: string }).version, "black-forest-labs/flux-fill-pro")
+        const before = calls.length
+        await replicatePredict("r8_test", "black-forest-labs/flux-fill-pro", { prompt: "again" })
+        assert.equal(calls.slice(before).some((call) => call.url.endsWith("/versions")), false)
+      },
+    )
+    console.log("ok official replicate models post owner/name")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL official replicate models post owner/name")
+    console.error(error)
+  }
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) return jsonResponse(404, { detail: "Not found" })
+        if (call.method === "POST") return jsonResponse(404, { detail: "The requested resource could not be found." })
+        return jsonResponse(500, { detail: "unexpected" })
+      },
+      async (calls) => {
+        await assert.rejects(
+          () => replicatePredict("r8_test", COMMUNITY, { image: "x" }),
+          (error: unknown) => {
+            assert.ok(error instanceof ProviderRequestError)
+            assert.equal(error.status, 404)
+            assert.equal(error.retryable, false)
+            assert.ok(error.message.includes(COMMUNITY), error.message)
+            assert.ok(error.message.includes("versão"), error.message)
+            return true
+          },
+        )
+        assert.equal(
+          calls.some((call) => /\/models\/.+\/predictions$/.test(call.url)),
+          false,
+        )
+      },
+    )
+    console.log("ok missing replicate model names the model id")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL missing replicate model names the model id")
+    console.error(error)
+  }
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) {
+          return jsonResponse(200, { results: [{ id: NEWER, created_at: "2025-01-01T00:00:00.000Z" }] })
+        }
+        if (call.method === "POST") {
+          return jsonResponse(200, {
+            id: "pred_wait",
+            status: "processing",
+            urls: { get: "https://api.replicate.com/v1/predictions/pred_wait" },
+          })
+        }
+        if (call.url === "https://api.replicate.com/v1/predictions/pred_wait") {
+          return jsonResponse(200, { id: "pred_wait", status: "succeeded", output: "polled" })
+        }
+        return jsonResponse(500, { detail: "unexpected" })
+      },
+      async (calls) => {
+        const output = await replicatePredict("r8_test", COMMUNITY, { image: "x" })
+        assert.equal(output, "polled")
+        const post = calls.find((call) => call.method === "POST")
+        assert.ok(post)
+        assert.equal(post.prefer, "wait=60")
+        assert.equal(
+          calls.some((call) => call.url === "https://api.replicate.com/v1/predictions/pred_wait"),
+          true,
+        )
+      },
+    )
+    console.log("ok replicate keeps wait and polls while the prediction is running")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL replicate keeps wait and polls while the prediction is running")
+    console.error(error)
+  }
+})()
 
 if (failed > 0) {
   console.error(`${failed} failed`)

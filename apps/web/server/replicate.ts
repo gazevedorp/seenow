@@ -3,6 +3,9 @@ import type { ClassMasks } from "./hf.ts"
 import { ProviderRequestError, httpFailure } from "./retry.ts"
 
 const ATTEMPT_MS = 110_000
+const VERSION_HASH = /^[0-9a-f]{64}$/i
+
+const versionCache = new Map<string, string>()
 
 type Prediction = {
   id?: string
@@ -10,6 +13,108 @@ type Prediction = {
   output?: unknown
   error?: unknown
   urls?: { get?: string }
+}
+
+type VersionRow = {
+  id?: string
+  created_at?: string
+}
+
+export function clearReplicateVersionCache(): void {
+  versionCache.clear()
+}
+
+function modelSlug(model: string): string {
+  const trimmed = model.trim()
+  const colon = trimmed.lastIndexOf(":")
+  if (colon > 0 && VERSION_HASH.test(trimmed.slice(colon + 1)) && trimmed.includes("/")) {
+    return trimmed.slice(0, colon)
+  }
+  return trimmed
+}
+
+function pinnedVersion(model: string): string | null {
+  const trimmed = model.trim()
+  if (VERSION_HASH.test(trimmed)) return trimmed
+  const colon = trimmed.lastIndexOf(":")
+  if (colon > 0 && trimmed.includes("/") && VERSION_HASH.test(trimmed.slice(colon + 1))) return trimmed
+  return null
+}
+
+async function errorDetail(response: Response): Promise<string | null> {
+  try {
+    const text = await response.text()
+    if (!text) return null
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown; error?: unknown; title?: unknown }
+      const detail = [parsed.detail, parsed.error, parsed.title].find((value) => typeof value === "string" && value.length > 0)
+      if (typeof detail === "string") return detail.slice(0, 300)
+    } catch {
+      return text.slice(0, 300)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function missingModel(slug: string, version: string, status: number, detail: string | null): ProviderRequestError {
+  const extra = detail ? ` ${detail}` : ""
+  return new ProviderRequestError(`Replicate não encontrou o modelo ${slug} (versão ${version}).${extra}`, status, false)
+}
+
+function newestVersionId(rows: VersionRow[]): string | null {
+  const usable = rows.filter((row): row is VersionRow & { id: string } => typeof row.id === "string" && VERSION_HASH.test(row.id))
+  if (usable.length === 0) return null
+  let best = usable[0]
+  let bestTime = Date.parse(best.created_at ?? "")
+  for (const row of usable.slice(1)) {
+    const time = Date.parse(row.created_at ?? "")
+    if (Number.isNaN(time)) continue
+    if (Number.isNaN(bestTime) || time > bestTime) {
+      best = row
+      bestTime = time
+    }
+  }
+  return best.id
+}
+
+async function resolvePredictionVersion(token: string, model: string): Promise<string> {
+  const pinned = pinnedVersion(model)
+  if (pinned) return pinned
+  const slug = modelSlug(model)
+  const cached = versionCache.get(slug)
+  if (cached) return cached
+
+  const [owner, name, ...rest] = slug.split("/")
+  if (!owner || !name || rest.length > 0) {
+    throw new ProviderRequestError(`Replicate não encontrou o modelo ${slug}.`, 404, false)
+  }
+  const response = await fetch(
+    `https://api.replicate.com/v1/models/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/versions`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(20_000),
+    },
+  )
+  if (!response.ok) {
+    const detail = await errorDetail(response)
+    if (response.status === 404) return slug
+    if (response.status === 422) throw missingModel(slug, slug, response.status, detail)
+    throw httpFailure(
+      response.status,
+      `Replicate não listou versões de ${slug} (${response.status}).${detail ? ` ${detail}` : ""}`,
+    )
+  }
+  const body = (await response.json()) as { results?: VersionRow[] }
+  const versionId = newestVersionId(Array.isArray(body.results) ? body.results : [])
+  if (!versionId) {
+    versionCache.set(slug, slug)
+    return slug
+  }
+  const version = `${slug}:${versionId}`
+  versionCache.set(slug, version)
+  return version
 }
 
 function asUrl(value: unknown): string | null {
@@ -21,19 +126,24 @@ function asUrl(value: unknown): string | null {
 }
 
 export async function replicatePredict(token: string, model: string, input: Record<string, unknown>): Promise<unknown> {
-  const response = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
+  const slug = modelSlug(model)
+  const version = await resolvePredictionVersion(token, model)
+  const response = await fetch("https://api.replicate.com/v1/predictions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Prefer: "wait=60",
     },
-    body: JSON.stringify({ input }),
+    body: JSON.stringify({ version, input }),
     signal: AbortSignal.timeout(70_000),
   })
   if (!response.ok) {
-    throw httpFailure(response.status, `Replicate recusou a chamada (${response.status}).`)
+    const detail = await errorDetail(response)
+    if (response.status === 404 || response.status === 422) throw missingModel(slug, version, response.status, detail)
+    throw httpFailure(response.status, `Replicate recusou a chamada de ${slug} (${response.status}).${detail ? ` ${detail}` : ""}`)
   }
+  if (version === slug) versionCache.set(slug, slug)
   let body = (await response.json()) as Prediction
   const started = Date.now()
   while (body.status === "starting" || body.status === "processing") {
