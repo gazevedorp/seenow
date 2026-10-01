@@ -55,10 +55,24 @@ export type PremiumEnvInput = {
 }
 
 export function adeClassBucket(label: string): "floor" | "wall" | "ceiling" | null {
-  const name = label.trim().toLowerCase()
-  if (FLOOR_CLASS_NAMES.has(name)) return "floor"
-  if (WALL_CLASS_NAMES.has(name)) return "wall"
-  if (CEILING_CLASS_NAMES.has(name)) return "ceiling"
+  const name = label
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+  if (/^\d+$/.test(name)) {
+    const id = Number(name)
+    if (id === ADE20K.wall) return "wall"
+    if (id === ADE20K.floor) return "floor"
+    if (id === ADE20K.ceiling) return "ceiling"
+    return null
+  }
+  if (name === "label 0") return "wall"
+  if (name === "label 3") return "floor"
+  if (name === "label 5") return "ceiling"
+  if (CEILING_CLASS_NAMES.has(name) || name.includes("ceiling")) return "ceiling"
+  if (FLOOR_CLASS_NAMES.has(name) || name.includes("floor")) return "floor"
+  if (WALL_CLASS_NAMES.has(name) || name.includes("wall")) return "wall"
   return null
 }
 

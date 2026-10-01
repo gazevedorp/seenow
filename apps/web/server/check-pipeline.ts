@@ -18,6 +18,7 @@ import {
 } from "../../../packages/shared/src/mask-ops.ts"
 import {
   ADE20K,
+  adeClassBucket,
   FAL_FLUX_FILL,
   REPLICATE_FLUX_FILL,
   REPLICATE_SEGFORMER,
@@ -49,6 +50,13 @@ test("ADE20K floor and wall class ids", () => {
   assert.equal(ADE20K.wall, 0)
   assert.equal(ADE20K.floor, 3)
   assert.equal(ADE20K.ceiling, 5)
+  assert.equal(adeClassBucket("wall"), "wall")
+  assert.equal(adeClassBucket("0"), "wall")
+  assert.equal(adeClassBucket("wall-brick"), "wall")
+  assert.equal(adeClassBucket("3"), "floor")
+  assert.equal(adeClassBucket("flooring"), "floor")
+  assert.equal(adeClassBucket("5"), "ceiling")
+  assert.equal(adeClassBucket("sofa"), null)
 })
 
 test("homography roundtrip", () => {

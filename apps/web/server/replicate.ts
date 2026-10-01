@@ -219,7 +219,7 @@ export async function replicateGroundedSam(
       surface === "FLOOR"
         ? "wall, ceiling, furniture, sofa, chair, table, person, plant, window, door"
         : "floor, ceiling, window, door, furniture, sofa, person, painting",
-    adjustment_factor: -1,
+    adjustment_factor: surface === "WALL" ? 0 : -1,
   })
   const items = Array.isArray(output) ? output : [output]
   const maskRef = items[2] ?? items[0]

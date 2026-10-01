@@ -57,6 +57,7 @@ export function ProductPicker({
       {products.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nenhum produto com esse filtro.</p>
       ) : (
+        <div className="max-h-[min(18rem,38svh)] overflow-y-auto overscroll-contain pr-0.5">
         <div className="grid grid-cols-2 gap-2">
           {products.map((product) => {
             const selected = product.id === selectedId
@@ -84,6 +85,7 @@ export function ProductPicker({
               </button>
             )
           })}
+        </div>
         </div>
       )}
     </div>

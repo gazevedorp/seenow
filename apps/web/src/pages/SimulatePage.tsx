@@ -62,7 +62,6 @@ export function SimulatePage() {
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null)
   const previewUrl = useObjectUrl(previewBlob)
   const [editSurface, setEditSurface] = useState<Surface>("FLOOR")
-  const [surfaceOverride, setSurfaceOverride] = useState<Surface | null>(null)
   const [productId, setProductId] = useState<string | null>(null)
   const [floorMask, setFloorMask] = useState<Uint8Array | null>(null)
   const [wallMask, setWallMask] = useState<Uint8Array | null>(null)
@@ -88,7 +87,7 @@ export function SimulatePage() {
   const beforeUrl = useObjectUrl(beforeBlob)
   const thumbs = useGenerationThumbs(generations)
   const product = productId ? findProduct(productId) : undefined
-  const surface: Surface = surfaceOverride ?? product?.surface ?? editSurface
+  const surface: Surface = editSurface
   const activeMask = surface === "FLOOR" ? floorMask : wallMask
   const photoKey = canvas ? `${projectId}:${canvas.width}x${canvas.height}` : ""
   useTitle(project ? project.name : "Simulação")
@@ -249,7 +248,7 @@ export function SimulatePage() {
 
   async function generate() {
     if (!canvas || !product || !floorMask || !wallMask || !project || generating) return
-    const appliedSurface = surfaceOverride ?? product.surface
+    const appliedSurface = editSurface
     const mask = appliedSurface === "FLOOR" ? floorMask : wallMask
     if (maskCoverage(mask) < 0.01) {
       setError("A máscara desta superfície está vazia.")
@@ -301,6 +300,7 @@ export function SimulatePage() {
         retryCount: 0,
       })
       setActiveId(id)
+      setShowMask(false)
       setStep("preview")
       toast.success("Prévia salva no projeto.")
     } catch (reason) {
@@ -382,7 +382,12 @@ export function SimulatePage() {
             />
           ) : null}
           {step === "product" && previewUrl ? (
-            <img src={previewUrl} alt="Ambiente do cliente" className="w-full rounded-2xl bg-muted object-contain" />
+            <div className="relative">
+              <img src={previewUrl} alt="Ambiente do cliente" className="w-full rounded-2xl bg-muted object-contain" />
+              {showMask && activeMask && canvas ? (
+                <MaskOverlay mask={activeMask} width={canvas.width} height={canvas.height} />
+              ) : null}
+            </div>
           ) : null}
           {step === "detect" && canvas && editedMask ? (
             <MaskEditor
@@ -430,7 +435,7 @@ export function SimulatePage() {
           ) : null}
         </section>
 
-        <aside className="space-y-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:sticky lg:top-20 lg:max-h-[calc(100svh-6rem)] lg:overflow-auto">
+        <aside className="flex max-h-[calc(100svh-6.5rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:sticky lg:top-20 lg:h-[calc(100svh-6.5rem)]">
           <PipelineSummary
             segmentationModel={
               maskSource?.model ??
@@ -454,6 +459,7 @@ export function SimulatePage() {
             Máscara de depuração
           </label>
 
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {step === "photo" ? (
             <>
               <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Foto</p>
@@ -461,9 +467,6 @@ export function SimulatePage() {
               <p className="text-sm text-muted-foreground">
                 JPEG, PNG ou WEBP até 10 MB. A proporção é mantida e o lado maior não passa de 2048 px.
               </p>
-              <Button className="h-11 w-full" disabled={!canvas} onClick={() => setStep("detect")}>
-                Detectar piso e parede
-              </Button>
             </>
           ) : null}
 
@@ -498,18 +501,6 @@ export function SimulatePage() {
               <p className="text-xs text-muted-foreground">
                 O recorte geométrico é um trapézio fixo. Ele não é SegFormer e não é apresentado como IA.
               </p>
-              <div className="flex gap-2">
-                <Button variant="outline" className="h-10" onClick={() => setStep("photo")}>
-                  Voltar
-                </Button>
-                <Button
-                  className="h-10 flex-1"
-                  disabled={!floorMask || !wallMask || detecting}
-                  onClick={() => setStep("product")}
-                >
-                  Escolher produto
-                </Button>
-              </div>
             </>
           ) : null}
 
@@ -520,38 +511,47 @@ export function SimulatePage() {
               <p className="text-sm text-muted-foreground">
                 A superfície segue o SKU. A textura do arquivo entra na máscara, com perspectiva e a luz da foto.
               </p>
+              <div className="grid grid-cols-2 gap-2">
+                {(["FLOOR", "WALL"] as const).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-pressed={editSurface === item}
+                    onClick={() => {
+                      setEditSurface(item)
+                      if (product && product.surface !== item) setProductId(null)
+                      setError(null)
+                    }}
+                    className={cn(
+                      "rounded-xl bg-secondary px-3 py-2 text-left text-sm",
+                      editSurface === item && "ring-2 ring-pine",
+                    )}
+                  >
+                    <span className="block font-medium">{surfaceLabel(item)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatPercent(maskCoverage(item === "FLOOR" ? (floorMask ?? new Uint8Array()) : (wallMask ?? new Uint8Array())))}
+                    </span>
+                  </button>
+                ))}
+              </div>
               {product ? (
                 <p className="text-sm">
                   {product.name} · {surfaceLabel(surface)} · {formatPercent(coverage)} da foto
                 </p>
-              ) : null}
-              {product ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 w-full"
-                  onClick={() => setSurfaceOverride(surface === "FLOOR" ? "WALL" : "FLOOR")}
-                >
-                  Usar a máscara de {surface === "FLOOR" ? "parede" : "piso"}
-                </Button>
-              ) : null}
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {surface === "WALL" ? "Escolha um revestimento de parede." : "Escolha um piso."}
+                </p>
+              )}
               <ProductPicker
+                surface={editSurface}
                 selectedId={productId}
                 onSelect={(next) => {
                   setProductId(next.id)
-                  setSurfaceOverride(null)
                   setEditSurface(next.surface)
                   setError(null)
                 }}
               />
-              <div className="flex gap-2">
-                <Button variant="outline" className="h-10" onClick={() => setStep("detect")}>
-                  Voltar
-                </Button>
-                <Button className="h-10 flex-1" disabled={!product || generating} onClick={() => void generate()}>
-                  {generating ? "Gerando…" : "Ver prévia"}
-                </Button>
-              </div>
             </>
           ) : null}
 
@@ -573,6 +573,54 @@ export function SimulatePage() {
                   <p className="mt-2 text-muted-foreground">{meta.technicalPrompt}</p>
                 </details>
               ) : null}
+              <GenerationHistoryList
+                items={generations}
+                thumbs={thumbs}
+                activeId={activeId}
+                onSelect={(id) => void showSaved(id)}
+              />
+            </>
+          ) : null}
+
+          </div>
+
+          {error ? (
+            <p role="alert" className="shrink-0 text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="shrink-0 border-t border-foreground/10 bg-card pt-3">
+            {step === "photo" ? (
+              <Button className="h-11 w-full" disabled={!canvas} onClick={() => setStep("detect")}>
+                Detectar piso e parede
+              </Button>
+            ) : null}
+            {step === "detect" ? (
+              <div className="flex gap-2">
+                <Button variant="outline" className="h-10" onClick={() => setStep("photo")}>
+                  Voltar
+                </Button>
+                <Button
+                  className="h-10 flex-1"
+                  disabled={!floorMask || !wallMask || detecting}
+                  onClick={() => setStep("product")}
+                >
+                  Escolher produto
+                </Button>
+              </div>
+            ) : null}
+            {step === "product" ? (
+              <div className="flex gap-2">
+                <Button variant="outline" className="h-10" onClick={() => setStep("detect")}>
+                  Voltar
+                </Button>
+                <Button className="h-10 flex-1" disabled={!product || generating} onClick={() => void generate()}>
+                  {generating ? "Gerando…" : "Continuar"}
+                </Button>
+              </div>
+            ) : null}
+            {step === "preview" ? (
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" className="h-10" onClick={() => setStep("product")}>
                   Trocar produto
@@ -584,20 +632,8 @@ export function SimulatePage() {
                   <Link to={`/projetos/${project.id}`}>Ver histórico</Link>
                 </Button>
               </div>
-              <GenerationHistoryList
-                items={generations}
-                thumbs={thumbs}
-                activeId={activeId}
-                onSelect={(id) => void showSaved(id)}
-              />
-            </>
-          ) : null}
-
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
+            ) : null}
+          </div>
         </aside>
       </div>
     </main>

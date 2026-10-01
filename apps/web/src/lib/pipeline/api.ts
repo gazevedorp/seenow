@@ -13,7 +13,7 @@ import {
   type Surface,
 } from "@seenow/shared"
 import { blobToBase64, canvasToBase64, canvasToBlob, maskToPng, scaleCanvas } from "@/lib/images"
-import { autoMask } from "@/lib/mask"
+import { autoMask, fallbackWallMask } from "@/lib/mask"
 import { compositeMaterial } from "@/lib/material/composite"
 import { pngBase64ToDepth, pngBase64ToMask, unionPngMasks } from "@/lib/pipeline/decode-mask"
 
@@ -207,7 +207,7 @@ export async function detectRoom(canvas: HTMLCanvasElement): Promise<RoomDetecti
   if (status.sam.configured && wallCheck.failed) {
     try {
       wall = combineRoomMasks({
-        floor: new Uint8Array(width * height),
+        floor,
         wall: await samMask(canvas, "WALL", width, height),
         ceiling: ceilingRaw,
         rug: new Uint8Array(width * height),
@@ -220,6 +220,12 @@ export async function detectRoom(canvas: HTMLCanvasElement): Promise<RoomDetecti
         `Parede: ${wallCheck.reason} Grounded SAM falhou (${error instanceof Error ? error.message : "erro"}).`,
       )
     }
+  }
+  if (maskCoverage(wall) < 0.03) {
+    wall = fallbackWallMask(floor, width, height)
+    notes.push(
+      "Parede: o modelo não marcou parede. A faixa acima do piso usa o recorte geométrico, não o SegFormer.",
+    )
   }
 
   let depth: Float32Array | null = null
