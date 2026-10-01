@@ -25,9 +25,11 @@ import {
   buildFluxPolishPrompt,
   resolvePremiumProviders,
 } from "../../../packages/shared/src/premium.ts"
+import { falFluxFill } from "./fal.ts"
 import { groupSegmentItems } from "./hf.ts"
+import { asImageDataUri } from "./image-uri.ts"
 import { ProviderRequestError } from "./retry.ts"
-import { clearReplicateVersionCache, replicatePredict } from "./replicate.ts"
+import { clearReplicateVersionCache, replicateFluxFill, replicatePredict, replicateSegformer } from "./replicate.ts"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 let failed = 0
@@ -221,6 +223,16 @@ test("segformer labels map onto floor wall ceiling and rug", () => {
   assert.deepEqual(grouped.wall, ["REVG"])
   assert.deepEqual(grouped.rug, ["R1JF"])
   assert.deepEqual(grouped.ceiling, ["Q0VM"])
+})
+
+test("bare png base64 becomes a data URI and is not wrapped twice", () => {
+  const png = "iVBORw0KGgoQUJD"
+  const uri = asImageDataUri(png)
+  assert.equal(uri, `data:image/png;base64,${png}`)
+  assert.equal(uri.startsWith("iVBOR"), false)
+  assert.equal(asImageDataUri(uri), uri)
+  assert.equal(asImageDataUri("/9j/QUJD", "image/png"), "data:image/jpeg;base64,/9j/QUJD")
+  assert.equal(asImageDataUri("https://cdn.example/room.jpg"), "https://cdn.example/room.jpg")
 })
 
 test("catalog ships floor and wall textures", () => {
@@ -434,6 +446,94 @@ await (async () => {
   } catch (error) {
     failed += 1
     console.error("FAIL replicate keeps wait and polls while the prediction is running")
+    console.error(error)
+  }
+
+  const png = "iVBORw0KGgoQUJD"
+  const jpeg = "/9j/QUJD"
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) {
+          return jsonResponse(200, { results: [{ id: NEWER, created_at: "2025-06-01T00:00:00.000Z" }] })
+        }
+        if (call.method === "POST" && call.url === "https://api.replicate.com/v1/predictions") {
+          return succeeded([{ label: "floor", mask: png }, { label: "wall", mask: `data:image/png;base64,${png}` }])
+        }
+        return jsonResponse(500, { detail: `unexpected ${call.method} ${call.url}` })
+      },
+      async (calls) => {
+        const masks = await replicateSegformer("r8_test", COMMUNITY, png)
+        assert.deepEqual(masks.floor, [png])
+        assert.deepEqual(masks.wall, [png])
+        const post = calls.find((call) => call.method === "POST")
+        assert.ok(post)
+        const image = (post.body as { input?: { image?: string } }).input?.image
+        assert.equal(image, `data:image/png;base64,${png}`)
+        assert.equal(
+          calls.some((call) => call.url.startsWith(png) || call.url.startsWith("iVBOR")),
+          false,
+        )
+      },
+    )
+    console.log("ok segformer sends a png data URI and reads base64 masks inline")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL segformer sends a png data URI and reads base64 masks inline")
+    console.error(error)
+  }
+
+  try {
+    const flux = `black-forest-labs/flux-fill-pro:${"c".repeat(64)}`
+    await withFetch(
+      (call) => {
+        if (call.url.endsWith("/versions")) return jsonResponse(500, { detail: "versions should be skipped" })
+        if (call.method === "POST" && call.url === "https://api.replicate.com/v1/predictions") {
+          return succeeded(`data:image/jpeg;base64,${jpeg}`)
+        }
+        return jsonResponse(500, { detail: `unexpected ${call.method} ${call.url}` })
+      },
+      async (calls) => {
+        const polished = await replicateFluxFill("r8_test", flux, jpeg, png, "keep the catalog tile")
+        assert.equal(polished.toString("base64"), jpeg)
+        const post = calls.find((call) => call.method === "POST")
+        assert.ok(post)
+        const input = (post.body as { input?: { image?: string; mask?: string } }).input
+        assert.equal(input?.image, `data:image/jpeg;base64,${jpeg}`)
+        assert.equal(input?.mask, `data:image/png;base64,${png}`)
+        assert.equal(calls.length, 1)
+      },
+    )
+    console.log("ok flux fill sends image and mask as data URIs")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL flux fill sends image and mask as data URIs")
+    console.error(error)
+  }
+
+  try {
+    await withFetch(
+      (call) => {
+        if (call.method === "POST" && call.url === "https://fal.run/fal-ai/flux-pro/v1/fill") {
+          return jsonResponse(200, { images: [{ url: `data:image/jpeg;base64,${jpeg}` }] })
+        }
+        return jsonResponse(500, { detail: `unexpected ${call.method} ${call.url}` })
+      },
+      async (calls) => {
+        const polished = await falFluxFill("fal_test", "fal-ai/flux-pro/v1/fill", jpeg, png, "seam")
+        assert.equal(polished.toString("base64"), jpeg)
+        const post = calls[0]
+        assert.ok(post)
+        const body = post.body as { image_url?: string; mask_url?: string }
+        assert.equal(body.image_url, `data:image/jpeg;base64,${jpeg}`)
+        assert.equal(body.mask_url, `data:image/png;base64,${png}`)
+      },
+    )
+    console.log("ok fal polish sends image and mask as data URIs")
+  } catch (error) {
+    failed += 1
+    console.error("FAIL fal polish sends image and mask as data URIs")
     console.error(error)
   }
 })()

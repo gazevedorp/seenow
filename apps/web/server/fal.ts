@@ -1,3 +1,4 @@
+import { asImageDataUri, imagePayloadBase64 } from "./image-uri.ts"
 import { ProviderRequestError, httpFailure } from "./retry.ts"
 
 type FalImage = { url?: unknown }
@@ -17,8 +18,8 @@ export async function falFluxFill(
     },
     body: JSON.stringify({
       prompt: prompt.slice(0, 4000),
-      image_url: imageUri,
-      mask_url: maskUri,
+      image_url: asImageDataUri(imageUri, "image/jpeg"),
+      mask_url: asImageDataUri(maskUri, "image/png"),
       num_images: 1,
       output_format: "jpeg",
       enhance_prompt: false,
@@ -34,9 +35,10 @@ export async function falFluxFill(
   if (typeof url !== "string") {
     throw new ProviderRequestError("O Flux Fill não devolveu imagem.", 502, true)
   }
-  if (url.startsWith("data:")) {
-    const payloadBase64 = url.slice(url.indexOf(",") + 1)
-    return Buffer.from(payloadBase64, "base64")
+  const inline = imagePayloadBase64(url)
+  if (inline) return Buffer.from(inline, "base64")
+  if (!/^https?:\/\//i.test(url)) {
+    throw new ProviderRequestError("O Flux Fill devolveu uma imagem que não é URL nem data URI.", 502, false)
   }
   const image = await fetch(url, { signal: AbortSignal.timeout(30_000) })
   if (!image.ok) throw httpFailure(image.status, "Não foi possível baixar o polimento da Fal.")

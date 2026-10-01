@@ -7,6 +7,7 @@ import {
 } from "../../../packages/shared/src/index.ts"
 import type { PipelineSecrets } from "./env.ts"
 import { falFluxFill } from "./fal.ts"
+import { asImageDataUri, imagePayloadBase64, sniffImageMime } from "./image-uri.ts"
 import { hasRoomClass, hfDepth, hfSegment, type ClassMasks } from "./hf.ts"
 import { replicateFluxFill, replicateGroundedSam, replicateSegformer } from "./replicate.ts"
 import { ProviderRequestError, withRetry } from "./retry.ts"
@@ -99,7 +100,7 @@ async function handleSegment(req: IncomingMessage, res: ServerResponse, context:
     note = primary.note
   } else {
     const outcome = await withRetry(
-      () => replicateSegformer(context.secrets.replicateToken, plan.model, dataUri(image.mime, image.base64)),
+      () => replicateSegformer(context.secrets.replicateToken, plan.model, asImageDataUri(image.base64, image.mime)),
       2,
     )
     classes = outcome.value
@@ -162,7 +163,7 @@ async function handleSam(req: IncomingMessage, res: ServerResponse, context: Pip
       replicateGroundedSam(
         context.secrets.replicateToken,
         context.plan.sam.model,
-        dataUri(image.mime, image.base64),
+        asImageDataUri(image.base64, image.mime),
         surface,
       ),
     2,
@@ -206,8 +207,8 @@ async function handlePolish(req: IncomingMessage, res: ServerResponse, context: 
       surface,
     })
   const started = Date.now()
-  const imageUri = dataUri(image.mime, image.base64)
-  const maskUri = dataUri("image/png", mask)
+  const imageUri = asImageDataUri(image.base64, image.mime)
+  const maskUri = asImageDataUri(mask, "image/png")
   const outcome = await withRetry(async () => {
     if (polish.provider === "fal") {
       return falFluxFill(context.secrets.falKey, polish.model, imageUri, maskUri, prompt)
@@ -233,14 +234,11 @@ function parseSurface(value: string | undefined): Surface | null {
 }
 
 function decodeImage(body: ImageBody): { bytes: Buffer; base64: string; mime: string } {
-  const base64 = body.imageBase64?.trim() ?? ""
-  if (!base64) throw new ProviderRequestError("Envie a foto do ambiente.", 400, false)
-  const mime = body.imageMime?.trim() || "image/jpeg"
+  const raw = body.imageBase64?.trim() ?? ""
+  if (!raw) throw new ProviderRequestError("Envie a foto do ambiente.", 400, false)
+  const base64 = imagePayloadBase64(raw) ?? raw.replace(/\s/g, "")
+  const mime = sniffImageMime(base64) ?? (body.imageMime?.trim() || "image/jpeg")
   return { bytes: Buffer.from(base64, "base64"), base64, mime }
-}
-
-function dataUri(mime: string, base64: string): string {
-  return `data:${mime};base64,${base64}`
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
