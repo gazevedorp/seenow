@@ -23,9 +23,9 @@ export function MaskOverlay({
       const alpha = mask[index] ?? 0
       if (alpha < 8) continue
       const offset = index * 4
-      image.data[offset] = 71
-      image.data[offset + 1] = 85
-      image.data[offset + 2] = 105
+      image.data[offset] = 115
+      image.data[offset + 1] = 115
+      image.data[offset + 2] = 115
       image.data[offset + 3] = Math.round(Math.min(255, alpha) * 0.45)
     }
     context.putImageData(image, 0, 0)

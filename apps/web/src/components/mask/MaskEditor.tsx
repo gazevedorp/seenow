@@ -11,9 +11,9 @@ function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number
     const alpha = mask[index] ?? 0
     if (alpha === 0) continue
     const offset = index * 4
-    image.data[offset] = 71
-    image.data[offset + 1] = 85
-    image.data[offset + 2] = 105
+    image.data[offset] = 115
+    image.data[offset + 1] = 115
+    image.data[offset + 2] = 115
     image.data[offset + 3] = Math.round(alpha * 0.45)
   }
   context.putImageData(image, 0, 0)
@@ -156,7 +156,7 @@ export function MaskEditor({
     context.lineCap = "round"
     context.lineJoin = "round"
     context.lineWidth = imageRadius * 2
-    context.strokeStyle = "rgba(71, 85, 105, 0.7)"
+    context.strokeStyle = "rgba(115, 115, 115, 0.7)"
     context.globalCompositeOperation = toolRef.current === "add" ? "source-over" : "destination-out"
     context.beginPath()
     context.moveTo(from.x, from.y)

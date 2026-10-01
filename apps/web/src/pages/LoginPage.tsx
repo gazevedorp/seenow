@@ -29,25 +29,25 @@ export function LoginPage() {
 
   return (
     <div className="grid min-h-svh lg:grid-cols-[1.1fr_0.9fr]">
-      <section className="relative hidden overflow-hidden bg-slate-900 text-slate-100 lg:flex">
+      <section className="relative hidden overflow-hidden bg-neutral-900 text-neutral-100 lg:flex">
         <div className="m-auto max-w-xl px-12 py-16">
-          <p className="text-xs tracking-[0.22em] text-slate-300 uppercase">Seenow</p>
+          <p className="text-xs tracking-[0.22em] text-neutral-300 uppercase">Seenow</p>
           <h1 className="mt-4 font-display text-6xl leading-[0.95] text-balance">
             O piso e a parede, no ambiente real.
           </h1>
-          <p className="mt-5 max-w-md text-base text-slate-300">
+          <p className="mt-5 max-w-md text-base text-neutral-300">
             A loja mostra o produto do catálogo na foto do cliente, com máscara conferida e comparação antes e depois.
           </p>
           <div className="mt-10 grid max-w-md grid-cols-2 overflow-hidden rounded-2xl ring-1 ring-white/15">
             <div>
-              <div className="h-28 bg-slate-200" />
-              <div className="h-20 bg-slate-400" />
-              <p className="px-3 py-2 text-xs tracking-wide text-slate-400 uppercase">Antes</p>
+              <div className="h-28 bg-neutral-200" />
+              <div className="h-20 bg-neutral-400" />
+              <p className="px-3 py-2 text-xs tracking-wide text-neutral-400 uppercase">Antes</p>
             </div>
             <div>
-              <div className="h-28 bg-slate-200" />
-              <div className="h-20 bg-slate-600" />
-              <p className="px-3 py-2 text-xs tracking-wide text-slate-400 uppercase">Depois</p>
+              <div className="h-28 bg-neutral-200" />
+              <div className="h-20 bg-neutral-600" />
+              <p className="px-3 py-2 text-xs tracking-wide text-neutral-400 uppercase">Depois</p>
             </div>
           </div>
         </div>
