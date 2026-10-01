@@ -9,6 +9,8 @@ import {
 } from "@seenow/shared"
 import { cn } from "cn"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { EmptyState } from "@/components/feedback/EmptyState"
 import { ProductSwatch } from "@/components/catalog/ProductSwatch"
 import { categoryLabel, filterCatalog } from "@/lib/catalog"
 
@@ -55,10 +57,10 @@ export function ProductPicker({
         ))}
       </div>
       {products.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nenhum produto com esse filtro.</p>
+        <EmptyState title="Nenhum produto" description="Nenhum SKU combina com esse filtro." className="px-4 py-8" />
       ) : (
-        <div className="max-h-[min(18rem,38svh)] overflow-y-auto overscroll-contain pr-0.5">
-        <div className="grid grid-cols-2 gap-2">
+        <ScrollArea className="h-[min(18rem,38svh)]">
+        <div className="grid grid-cols-2 gap-2 pr-3">
           {products.map((product) => {
             const selected = product.id === selectedId
             return (
@@ -86,7 +88,7 @@ export function ProductPicker({
             )
           })}
         </div>
-        </div>
+        </ScrollArea>
       )}
     </div>
   )

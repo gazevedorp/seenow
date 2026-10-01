@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ClientRecord, ProjectRecord } from "@seenow/shared"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -79,7 +79,7 @@ export function NewSimulationPage() {
       await studioDb.addProject(project)
       navigate(`/simular/${project.id}`, { state: { start: useSample ? "detect" : "photo" } })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível criar a simulação.")
+      notify.error(error instanceof Error ? error.message : "Não foi possível criar a simulação.")
       setPending(false)
     }
   }

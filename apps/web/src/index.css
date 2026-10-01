@@ -107,7 +107,7 @@
     --secondary: oklch(0.32 0.032 52);
     --secondary-foreground: oklch(0.96 0.014 85);
     --muted: oklch(0.31 0.028 55);
-    --muted-foreground: oklch(0.76 0.024 75);
+    --muted-foreground: oklch(0.84 0.02 82);
     --accent: oklch(0.34 0.04 45);
     --accent-foreground: oklch(0.96 0.014 85);
     --destructive: oklch(0.7 0.15 35);
@@ -162,4 +162,15 @@
 .dark ::selection {
   background: oklch(0.45 0.07 48);
   color: oklch(0.96 0.014 85);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import type { Surface } from "@seenow/shared"
-import { Button } from "@/components/ui/button"
+import { MaskToolbar } from "@/components/mask/MaskToolbar"
 import { stampLine } from "@/lib/mask"
 
 function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number, height: number) {
@@ -30,6 +30,7 @@ export function MaskEditor({
   onChange,
   onRedetect,
   redetectLabel = "Detectar de novo",
+  onToggleOverlay,
 }: {
   source: HTMLCanvasElement
   width: number
@@ -41,6 +42,7 @@ export function MaskEditor({
   onChange: (next: Uint8Array) => void
   onRedetect?: () => void
   redetectLabel?: string
+  onToggleOverlay: () => void
 }) {
   const viewRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -95,6 +97,45 @@ export function MaskEditor({
     if (overlay) paintOverlay(overlay, next, width, height)
     onChange(next.slice())
   }
+
+  function undo() {
+    const previous = undoRef.current.pop()
+    setCanUndo(undoRef.current.length > 0)
+    if (!previous) return
+    publish(previous)
+  }
+
+  function clearMask() {
+    remember()
+    publish(new Uint8Array(width * height))
+  }
+
+  const actions = useRef({ undo, clearMask, onToggleOverlay, onRedetect })
+
+  useEffect(() => {
+    actions.current = { undo, clearMask, onToggleOverlay, onRedetect }
+  })
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault()
+        actions.current.undo()
+        return
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === "b") setTool("add")
+      else if (key === "e") setTool("erase")
+      else if (key === "[") setRadius((value) => Math.max(12, value - 4))
+      else if (key === "]") setRadius((value) => Math.min(72, value + 4))
+      else if (key === "d") actions.current.onToggleOverlay()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   function locate(event: ReactPointerEvent<HTMLCanvasElement>) {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -160,67 +201,19 @@ export function MaskEditor({
           }}
         />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "add" ? "default" : "outline"}
-          aria-pressed={tool === "add"}
-          onClick={() => setTool("add")}
-        >
-          Pincel
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "erase" ? "default" : "outline"}
-          aria-pressed={tool === "erase"}
-          onClick={() => setTool("erase")}
-        >
-          Borracha
-        </Button>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          Tamanho
-          <input
-            type="range"
-            min={12}
-            max={72}
-            value={radius}
-            onChange={(event) => setRadius(Number(event.target.value))}
-            aria-label="Tamanho do pincel"
-          />
-        </label>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!canUndo}
-          onClick={() => {
-            const previous = undoRef.current.pop()
-            setCanUndo(undoRef.current.length > 0)
-            if (!previous) return
-            publish(previous)
-          }}
-        >
-          Desfazer
-        </Button>
-        {onRedetect ? (
-          <Button type="button" size="sm" variant="outline" onClick={onRedetect}>
-            {redetectLabel}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            remember()
-            publish(new Uint8Array(width * height))
-          }}
-        >
-          Limpar
-        </Button>
-      </div>
+      <MaskToolbar
+        tool={tool}
+        onTool={setTool}
+        radius={radius}
+        onRadius={setRadius}
+        canUndo={canUndo}
+        onUndo={undo}
+        onRedetect={onRedetect}
+        redetectLabel={redetectLabel}
+        onClear={clearMask}
+        showOverlay={showOverlay}
+        onToggleOverlay={onToggleOverlay}
+      />
       <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   )
