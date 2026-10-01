@@ -1,6 +1,8 @@
 import { Component, type ReactNode } from "react"
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom"
+import { DesktopOnlyGate } from "@/components/layout/DesktopOnlyGate"
 import { AppShell } from "@/components/layout/AppShell"
+import { ThemeProvider } from "@/components/theme/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { useSession } from "@/lib/auth"
 import { useStudio } from "@/lib/db"
@@ -38,6 +40,16 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { message: str
 }
 
 export function App() {
+  return (
+    <ThemeProvider>
+      <DesktopOnlyGate>
+        <StudioApp />
+      </DesktopOnlyGate>
+    </ThemeProvider>
+  )
+}
+
+function StudioApp() {
   const studio = useStudio()
 
   if (!studio.ready) {

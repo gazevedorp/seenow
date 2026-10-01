@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ThemeToggle } from "@/components/theme/theme-toggle"
 import { useSession, auth } from "@/lib/auth"
 import { usePipelineStatus } from "@/lib/pipeline/api"
 
@@ -55,6 +56,7 @@ export function AppShell() {
               {session?.organizationName}
             </span>
             <span className="hidden text-sm sm:inline">{session?.fullName}</span>
+            <ThemeToggle />
             <Button
               variant="ghost"
               onClick={() => {

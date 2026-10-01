@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { Navigate } from "react-router-dom"
+import { ThemeToggle } from "@/components/theme/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -51,7 +52,10 @@ export function LoginPage() {
           </div>
         </div>
       </section>
-      <section className="flex items-center bg-background px-5 py-12">
+      <section className="relative flex items-center bg-background px-5 py-12">
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
+        </div>
         <div className="mx-auto w-full max-w-md">
           <p className="font-display text-3xl lg:hidden">SEENOW</p>
           <h2 className="mt-2 font-display text-4xl tracking-tight">Entrar no estúdio</h2>
