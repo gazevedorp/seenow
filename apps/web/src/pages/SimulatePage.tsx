@@ -336,13 +336,10 @@ export function SimulatePage() {
   const coverage = activeMask ? maskCoverage(activeMask) : 0
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6">
+    <main className="w-full px-4 py-4 lg:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link to={`/projetos/${project.id}`} className="text-sm text-muted-foreground hover:text-foreground">
-            {client.fullName} · {project.name}
-          </Link>
-          <h1 className="mt-1 font-display text-4xl tracking-tight">Simulação</h1>
+          <h1 className="font-display text-4xl tracking-tight">Simulação</h1>
         </div>
         <ol className="flex gap-1 overflow-x-auto">
           {STEPS.map((item, index) => {
@@ -371,7 +368,7 @@ export function SimulatePage() {
         </ol>
       </div>
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.75fr)]">
+      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,22rem)]">
         <section className="relative min-w-0">
           {step === "photo" ? (
             <EnvironmentUploader
@@ -435,7 +432,7 @@ export function SimulatePage() {
           ) : null}
         </section>
 
-        <aside className="flex max-h-[calc(100svh-6.5rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:sticky lg:top-20 lg:h-[calc(100svh-6.5rem)]">
+        <aside className="flex max-h-[calc(100svh-4.5rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:sticky lg:top-14 lg:h-[calc(100svh-4.5rem)]">
           <PipelineSummary
             segmentationModel={
               maskSource?.model ??

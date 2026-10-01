@@ -62,10 +62,7 @@ export function ProjectPage() {
   return (
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
       <div>
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
-          Simulações
-        </Link>
-        <h1 className="mt-2 font-display text-5xl tracking-tight">{project.name}</h1>
+        <h1 className="font-display text-5xl tracking-tight">{project.name}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {client?.fullName ?? "Cliente"}
           {client?.phone ? ` · ${client.phone}` : ""}
