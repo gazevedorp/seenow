@@ -1,6 +1,9 @@
 import { Component, type ReactNode } from "react"
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom"
+import { DesktopOnlyGate } from "@/components/layout/DesktopOnlyGate"
 import { AppShell } from "@/components/layout/AppShell"
+import { ThemeProvider } from "@/components/theme/theme-provider"
+import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { useSession } from "@/lib/auth"
 import { useStudio } from "@/lib/db"
@@ -27,9 +30,14 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { message: str
   render() {
     if (this.state.message) {
       return (
-        <main className="mx-auto max-w-lg px-4 py-16">
-          <h1 className="font-display text-4xl">Algo quebrou no estúdio</h1>
-          <p className="mt-3 text-sm text-muted-foreground">{this.state.message}</p>
+        <main role="alert" className="grid min-h-svh place-items-center px-6">
+          <div className="max-w-lg text-center">
+            <h1 className="font-display text-4xl">Algo quebrou no estúdio</h1>
+            <p className="mt-3 text-sm text-muted-foreground">{this.state.message}</p>
+            <Button type="button" className="mt-6" onClick={() => window.location.reload()}>
+              Recarregar
+            </Button>
+          </div>
         </main>
       )
     }
@@ -38,6 +46,16 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { message: str
 }
 
 export function App() {
+  return (
+    <ThemeProvider>
+      <DesktopOnlyGate>
+        <StudioApp />
+      </DesktopOnlyGate>
+    </ThemeProvider>
+  )
+}
+
+function StudioApp() {
   const studio = useStudio()
 
   if (!studio.ready) {

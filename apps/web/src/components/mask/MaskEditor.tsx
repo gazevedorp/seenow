@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import type { Surface } from "@seenow/shared"
-import { Button } from "@/components/ui/button"
-import { autoMask, stampLine } from "@/lib/mask"
+import { MaskToolbar } from "@/components/mask/MaskToolbar"
+import { stampLine } from "@/lib/mask"
 
 function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number, height: number) {
   const context = canvas.getContext("2d")
@@ -11,9 +11,9 @@ function paintOverlay(canvas: HTMLCanvasElement, mask: Uint8Array, width: number
     const alpha = mask[index] ?? 0
     if (alpha === 0) continue
     const offset = index * 4
-    image.data[offset] = 166
-    image.data[offset + 1] = 78
-    image.data[offset + 2] = 42
+    image.data[offset] = 115
+    image.data[offset + 1] = 115
+    image.data[offset + 2] = 115
     image.data[offset + 3] = Math.round(alpha * 0.45)
   }
   context.putImageData(image, 0, 0)
@@ -25,14 +25,24 @@ export function MaskEditor({
   height,
   surface,
   mask,
+  showOverlay = true,
+  hint,
   onChange,
+  onRedetect,
+  redetectLabel = "Detectar de novo",
+  onToggleOverlay,
 }: {
   source: HTMLCanvasElement
   width: number
   height: number
   surface: Surface
   mask: Uint8Array
+  showOverlay?: boolean
+  hint: string
   onChange: (next: Uint8Array) => void
+  onRedetect?: () => void
+  redetectLabel?: string
+  onToggleOverlay: () => void
 }) {
   const viewRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -88,6 +98,45 @@ export function MaskEditor({
     onChange(next.slice())
   }
 
+  function undo() {
+    const previous = undoRef.current.pop()
+    setCanUndo(undoRef.current.length > 0)
+    if (!previous) return
+    publish(previous)
+  }
+
+  function clearMask() {
+    remember()
+    publish(new Uint8Array(width * height))
+  }
+
+  const actions = useRef({ undo, clearMask, onToggleOverlay, onRedetect })
+
+  useEffect(() => {
+    actions.current = { undo, clearMask, onToggleOverlay, onRedetect }
+  })
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault()
+        actions.current.undo()
+        return
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === "b") setTool("add")
+      else if (key === "e") setTool("erase")
+      else if (key === "[") setRadius((value) => Math.max(12, value - 4))
+      else if (key === "]") setRadius((value) => Math.min(72, value + 4))
+      else if (key === "d") actions.current.onToggleOverlay()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   function locate(event: ReactPointerEvent<HTMLCanvasElement>) {
     const rect = event.currentTarget.getBoundingClientRect()
     if (rect.width < 2 || rect.height < 2) return null
@@ -107,7 +156,7 @@ export function MaskEditor({
     context.lineCap = "round"
     context.lineJoin = "round"
     context.lineWidth = imageRadius * 2
-    context.strokeStyle = "rgba(166, 78, 42, 0.45)"
+    context.strokeStyle = "rgba(115, 115, 115, 0.7)"
     context.globalCompositeOperation = toolRef.current === "add" ? "source-over" : "destination-out"
     context.beginPath()
     context.moveTo(from.x, from.y)
@@ -125,9 +174,9 @@ export function MaskEditor({
         <canvas ref={viewRef} className="absolute inset-0 h-full w-full" />
         <canvas
           ref={overlayRef}
-          aria-label="Editor de máscara"
+          aria-label={surface === "FLOOR" ? "Editor da máscara do piso" : "Editor da máscara da parede"}
           className="absolute inset-0 h-full w-full touch-none"
-          style={{ cursor: tool === "add" ? "crosshair" : "cell" }}
+          style={{ cursor: tool === "add" ? "crosshair" : "cell", opacity: showOverlay ? 1 : 0 }}
           onPointerDown={(event) => {
             const point = locate(event)
             if (!point) return
@@ -152,79 +201,20 @@ export function MaskEditor({
           }}
         />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "add" ? "default" : "outline"}
-          aria-pressed={tool === "add"}
-          onClick={() => setTool("add")}
-        >
-          Pincel
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={tool === "erase" ? "default" : "outline"}
-          aria-pressed={tool === "erase"}
-          onClick={() => setTool("erase")}
-        >
-          Borracha
-        </Button>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          Tamanho
-          <input
-            type="range"
-            min={12}
-            max={72}
-            value={radius}
-            onChange={(event) => setRadius(Number(event.target.value))}
-            aria-label="Tamanho do pincel"
-          />
-        </label>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!canUndo}
-          onClick={() => {
-            const previous = undoRef.current.pop()
-            setCanUndo(undoRef.current.length > 0)
-            if (!previous) return
-            publish(previous)
-          }}
-        >
-          Desfazer
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            remember()
-            publish(autoMask(width, height, surface))
-          }}
-        >
-          Sugerir de novo
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            remember()
-            publish(new Uint8Array(width * height))
-          }}
-        >
-          Limpar
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {surface === "FLOOR"
-          ? "A sugestão cobre o piso. Apague móveis e vasos que não devem mudar."
-          : "A sugestão cobre a parede e reserva a janela de exemplo. Ajuste o quadro se quiser mantê-lo."}{" "}
-        Sugestão local, sem OpenAI nesta fase.
-      </p>
+      <MaskToolbar
+        tool={tool}
+        onTool={setTool}
+        radius={radius}
+        onRadius={setRadius}
+        canUndo={canUndo}
+        onUndo={undo}
+        onRedetect={onRedetect}
+        redetectLabel={redetectLabel}
+        onClear={clearMask}
+        showOverlay={showOverlay}
+        onToggleOverlay={onToggleOverlay}
+      />
+      <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   )
 }

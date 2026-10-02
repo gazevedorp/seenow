@@ -1,7 +1,7 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import type { ClientRecord, ProjectRecord } from "@seenow/shared"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -77,19 +77,16 @@ export function NewSimulationPage() {
         project.hasPhoto = true
       }
       await studioDb.addProject(project)
-      navigate(`/simular/${project.id}`, { state: { start: useSample ? "surface" : "photo" } })
+      navigate(`/simular/${project.id}`, { state: { start: useSample ? "detect" : "photo" } })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível criar a simulação.")
+      notify.error(error instanceof Error ? error.message : "Não foi possível criar a simulação.")
       setPending(false)
     }
   }
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8">
-      <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
-        Voltar às simulações
-      </Link>
-      <h1 className="mt-3 font-display text-5xl tracking-tight">Nova simulação</h1>
+      <h1 className="font-display text-5xl tracking-tight">Nova simulação</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         O cliente fica vinculado ao ambiente. Nome é o único campo obrigatório.
       </p>

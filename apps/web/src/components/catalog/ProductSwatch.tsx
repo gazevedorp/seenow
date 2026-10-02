@@ -1,33 +1,27 @@
-import { useEffect, useRef } from "react"
-import type { CatalogProduct, Surface } from "@seenow/shared"
-import { drawTexture } from "@/lib/textures"
+import { useState } from "react"
+import type { CatalogProduct } from "@seenow/shared"
+import { cn } from "cn"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function ProductSwatch({
   product,
-  surface,
   className,
 }: {
   product: CatalogProduct
-  surface: Surface
   className?: string
 }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = ref.current
-    if (!canvas) return
-    const context = canvas.getContext("2d")
-    if (!context) return
-    drawTexture(context, product, surface, canvas.width, canvas.height)
-  }, [product, surface])
+  const [ready, setReady] = useState(false)
+  const frame = className ?? "aspect-[16/10] w-full object-cover"
 
   return (
-    <canvas
-      ref={ref}
-      width={320}
-      height={200}
-      aria-hidden
-      className={className ?? "aspect-[16/10] w-full"}
-    />
+    <span className="relative block bg-muted">
+      {ready ? null : <Skeleton className={cn("absolute inset-0", frame)} />}
+      <img
+        src={product.textureUrl}
+        alt=""
+        onLoad={() => setReady(true)}
+        className={cn(frame, ready ? "opacity-100" : "opacity-0")}
+      />
+    </span>
   )
 }

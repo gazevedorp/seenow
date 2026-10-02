@@ -1,8 +1,17 @@
 # SEENOW
 
-Estúdio para lojas de piso, tinta e arquitetos simularem uma troca de piso ou parede na foto real do ambiente. Esta entrega é a **fase 1**: o fluxo de quem opera a simulação, rodando só no navegador, sem chave de API.
+Estúdio para lojas de piso e revestimento simularem a troca do material na foto real do ambiente. O caminho premium compõe a **textura do catálogo** dentro da máscara, com perspectiva e a luz da foto. Fora da máscara, os pixels originais permanecem.
 
-A geração local compõe a textura do produto **somente dentro da máscara**. Fora dela, os pixels da foto permanecem os originais.
+## Pipeline
+
+1. **Segmentação.** Com `HF_TOKEN`, o servidor do Vite chama o SegFormer ADE20K `nvidia/segformer-b5-finetuned-ade-640-640` (classes parede `0`, piso `3`, teto `5`). Se o B5 não responder, tenta `nvidia/segformer-b2-finetuned-ade-512-512`. Sem token da Hugging Face e com `REPLICATE_API_TOKEN`, o mesmo modelo roda como `simbrams/segformer-b5-finetuned-ade-640-640`. Esse id é um modelo da comunidade: o servidor busca a versão mais recente e cria a previsão em `POST /v1/predictions` com `owner/nome:<id>`. Para travar a versão, use `owner/nome:<id de 64 caracteres>`. O Flux Fill oficial segue como `owner/nome`. A máscara passa por um fechamento de 1 px para limpar a borda; móveis continuam de fora. O Grounded SAM (`schananas/grounded_sam`) só entra se a máscara do SegFormer for implausível e houver token do Replicate.
+2. **Material.** A textura do SKU (`textureUrl`, `tileScale`) é projetada na região com homografia e reiluminada pela luminância da foto (multiply + soft-light). Esse passo é `perspective-warp-v1` e não depende de prompt generativo.
+3. **Polimento.** Com `FAL_KEY`, o Flux Fill `fal-ai/flux-pro/v1/fill` repinta só a faixa de emenda da máscara. Sem a Fal e com Replicate, usa `black-forest-labs/flux-fill-pro`. O interior da textura composta não é redesenhado. `OPENAI_API_KEY` não segmenta e não aplica o material.
+4. **Profundidade.** Com `HF_TOKEN`, o Depth Anything V2 pode ajustar o encolhimento do piso. Se falhar, a homografia segue sozinha.
+
+Sem chave, a tela usa o recorte `geometric-trapezoid-v1` e avisa que não é SegFormer. A textura do catálogo ainda é aplicada. Não há fallback para heurística de cor (`room-color-region-v1`) nem para `gpt-image`.
+
+As chaves ficam no processo do Vite (`apps/web/.env.local`, sem prefixo `VITE_`). O bundle do browser não as recebe.
 
 ## Rodar localmente
 
@@ -10,10 +19,11 @@ Requisitos: Node 22+ e pnpm 10.
 
 ```bash
 pnpm install
+cp apps/web/.env.example apps/web/.env.local
 pnpm --filter web dev
 ```
 
-O Vite sobe em [http://127.0.0.1:4317](http://127.0.0.1:4317).
+O Vite sobe em [http://127.0.0.1:4317](http://127.0.0.1:4317). As rotas `/api/pipeline-status`, `/api/segment`, `/api/segment-sam` e `/api/polish` existem nesse servidor. Reinicie o `dev` depois de mudar o `.env.local`.
 
 Equivalente, a partir da raiz:
 
@@ -24,6 +34,7 @@ pnpm dev
 Checagens:
 
 ```bash
+pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
@@ -31,54 +42,56 @@ pnpm build
 
 ## Variáveis de ambiente
 
-Todas são opcionais. Sem nenhuma delas o app entra em modo demonstração e gera com o provedor `mock`.
-
-Copie o exemplo para o app web (o Vite lê este diretório, não a raiz):
-
-```bash
-cp apps/web/.env.example apps/web/.env.local
-```
-
 | Variável | Padrão | Uso |
 | --- | --- | --- |
-| `VITE_INPAINTING_PROVIDER` | `mock` | `mock`, `openai` ou `replicate` |
-| `VITE_API_URL` | vazio | API Nest da fase 2. Sem ela, `openai` e `replicate` caem no mock e a tela avisa |
+| `HF_TOKEN` | vazio | SegFormer B5 (fallback B2) e Depth Anything V2 |
+| `REPLICATE_API_TOKEN` | vazio | SegFormer, Grounded SAM e Flux Fill se não houver Fal |
+| `FAL_KEY` | vazio | Flux Fill `fal-ai/flux-pro/v1/fill` |
+| `OPENAI_API_KEY` | vazio | Ignorada neste fluxo |
+| `SEGMENTATION_PROVIDER` | `auto` | `auto`, `huggingface`, `replicate` ou `off` |
+| `POLISH_PROVIDER` | `auto` | `auto`, `fal`, `replicate` ou `off` |
+| `DEPTH_PROVIDER` | `auto` | `auto` ou `off` |
 | `VITE_SUPABASE_URL` | vazio | Só é detectada na tela de entrada. Auth real fica para a fase 2 |
-| `VITE_SUPABASE_ANON_KEY` | vazio | Idem. Nunca coloque `service_role` no front, nem com prefixo `VITE_` |
+| `VITE_SUPABASE_ANON_KEY` | vazio | Idem. Nunca coloque `service_role` no front |
 
-Não há segredo obrigatório. A chave de OpenAI ou Replicate não entra no browser: quando o provedor real existir, ele roda na API.
+Modelos e overrides estão em `apps/web/.env.example`.
 
 ## Validar o fluxo
 
-1. Abra o app e clique em **Entrar na demonstração** (ou use qualquer e-mail válido e uma senha com 4+ caracteres).
+1. Abra o app e clique em **Entrar na demonstração**.
 2. Em Simulações, clique em **Abrir demonstração**. Isso cria a cliente Marina Costa, o ambiente Sala de estar e uma foto de exemplo.
-3. Escolha **Piso** ou **Parede**.
-4. Escolha um produto do catálogo (8 itens: pisos, porcelanatos, revestimento e tintas).
-5. Na máscara, ajuste com pincel e borracha se quiser. **Confirmar máscara** é obrigatório.
-6. **Gerar simulação**. O modo mock devolve o antes/depois em seguida.
-7. Arraste o controle para comparar. A versão fica no histórico do projeto, neste navegador (IndexedDB).
+3. A detecção marca piso e parede. A barra lateral mostra o provedor e o id do modelo de verdade.
+4. Escolha um SKU. Piso ou parede acompanha a superfície do produto.
+5. **Ver prévia**. O antes/depois compara a foto com a textura aplicada. **Máscara de depuração** liga o overlay.
+6. A versão fica no histórico do projeto, neste navegador (IndexedDB).
 
-Para uma foto sua: **Nova simulação**, cadastre o cliente (nome obrigatório; e-mail, telefone e documento opcionais) e envie JPEG, PNG ou WEBP de até 10 MB. O lado maior é limitado a 2048 px, sem mudar a proporção.
+Para uma foto sua: **Nova simulação**, cadastre o cliente e envie JPEG, PNG ou WEBP de até 10 MB. O lado maior é limitado a 2048 px.
 
-Os dados não vão para um servidor. Limpar os dados do site no navegador apaga clientes, fotos e versões.
+Os dados da simulação não vão para um servidor seu. As chamadas de SegFormer, Depth Anything e Flux Fill saem do processo do Vite quando as chaves existem. Limpar os dados do site no navegador apaga clientes, fotos e versões.
+
+## Catálogo
+
+Nove texturas contínuas em `apps/web/public/textures`: laminado carvalho claro e escuro, vinílico madeira e pedra, porcelanato cinza mate e mármore, carpete cinza, cerâmica hexagonal e subway. Para regerar:
+
+```bash
+node --experimental-strip-types apps/web/scripts/generate-textures.ts
+```
 
 ## Estrutura
 
 ```
-apps/web            Vite + React + TypeScript + Tailwind + shadcn
-packages/shared     tipos do domínio e contrato do InpaintingAdapter
-supabase/           stub da fase 2 (migrations, RLS, storage)
+apps/web                 Vite + React. O plugin em vite-plugin-pipeline.ts expõe /api
+apps/web/server          SegFormer, Flux Fill e Depth Anything
+apps/web/src/lib/material  homografia, tile e relight
+packages/shared          tipos, catálogo, máscara e resolução de provedor
+supabase/                stub da fase 2
 ```
-
-O adapter está em `apps/web/src/lib/inpainting/`. `MockInpaintingAdapter` é o padrão. `RemoteInpaintingAdapter` só é usado com `VITE_API_URL` e provedor `openai` ou `replicate`.
 
 ## Fase 2
 
 Ainda não entra nesta entrega:
 
-- painel admin, organizações, usuários e papéis (`SUPER_ADMIN`, `ORGANIZATION_ADMIN`, `ARCHITECT`)
-- relatórios de uso, cota e auditoria
-- API NestJS na VPS Hostinger (`apps/api`)
-- migrations Supabase em `sa-east-1`, RLS por `organization_id`, bucket privado e Auth e-mail/senha
-- segmentação OpenAI e inpainting real (spike `gpt-image` com máscara × Replicate `flux-fill-pro`), com retry e composição no servidor
-- deploy (front na Vercel, API na VPS). Não há ambiente de produção nesta fase
+- painel admin, organizações, usuários e papéis
+- API NestJS e o worker com better-sqlite3
+- migrations Supabase, RLS e Auth
+- deploy (front na Vercel, API na VPS)

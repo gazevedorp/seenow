@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/feedback/EmptyState"
+import { Skeleton } from "@/components/ui/skeleton"
+import { notify } from "@/lib/notify"
 import { startDemoProject } from "@/lib/demo"
 import { useStudio } from "@/lib/db"
 import { formatWhen } from "@/lib/format"
@@ -17,9 +19,9 @@ export function ProjectsPage() {
     setPending(true)
     try {
       const projectId = await startDemoProject()
-      navigate(`/simular/${projectId}`, { state: { start: "surface" } })
+      navigate(`/simular/${projectId}`, { state: { start: "detect" } })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível abrir a demonstração.")
+      notify.error(error instanceof Error ? error.message : "Não foi possível abrir a demonstração.")
       setPending(false)
     }
   }
@@ -44,13 +46,19 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      {studio.projects.length === 0 ? (
-        <div className="mt-10 rounded-3xl border border-dashed px-6 py-16 text-center">
-          <p className="mx-auto max-w-md text-sm text-muted-foreground">
-            Nenhuma simulação ainda. Abra um ambiente para mostrar o piso ou a parede com um produto do catálogo.
-          </p>
+      {pending ? (
+        <div className="mt-8 grid gap-3 sm:grid-cols-2" role="status" aria-label="Abrindo a demonstração">
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
         </div>
-      ) : (
+      ) : null}
+      {studio.projects.length === 0 && !pending ? (
+        <EmptyState
+          className="mt-10"
+          title="Nenhuma simulação"
+          description="Nenhuma simulação ainda. Abra um ambiente para mostrar o piso ou a parede com um produto do catálogo."
+        />
+      ) : studio.projects.length === 0 ? null : (
         <ul className="mt-8 grid gap-3 sm:grid-cols-2">
           {studio.projects.map((project) => {
             const client = studio.clients.find((item) => item.id === project.clientId)

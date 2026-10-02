@@ -41,6 +41,17 @@ function fillRect(
   }
 }
 
+/** Wall band above the floor, with floor pixels removed, when SegFormer returns no wall. */
+export function fallbackWallMask(floor: Uint8Array, width: number, height: number): Uint8Array {
+  const geometric = autoMask(width, height, "WALL")
+  const out = new Uint8Array(geometric.length)
+  const limit = Math.min(out.length, floor.length)
+  for (let index = 0; index < limit; index++) {
+    if ((geometric[index] ?? 0) >= 128 && (floor[index] ?? 0) < 128) out[index] = 255
+  }
+  return out
+}
+
 export function autoMask(width: number, height: number, surface: Surface): Uint8Array {
   const mask = createMask(width, height)
   const floorTop = Math.round(height * FLOOR_HORIZON)

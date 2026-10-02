@@ -1,6 +1,8 @@
 import { surfaceLabel, type GenerationRecord } from "@seenow/shared"
 import { cn } from "cn"
-import { formatBrl, formatWhen, providerLabel } from "@/lib/format"
+import { EmptyState } from "@/components/feedback/EmptyState"
+import { Skeleton } from "@/components/ui/skeleton"
+import { formatWhen } from "@/lib/format"
 
 export function GenerationHistoryList({
   items,
@@ -15,14 +17,16 @@ export function GenerationHistoryList({
 }) {
   if (items.length === 0) {
     return (
-      <p className="rounded-2xl border border-dashed px-4 py-8 text-sm text-muted-foreground">
-        Nenhuma versão salva neste projeto. Gere uma simulação para comparar antes e depois.
-      </p>
+      <EmptyState
+        title="Nenhuma versão"
+        description="Nenhuma versão salva neste projeto. Gere uma simulação para comparar antes e depois."
+        className="px-4 py-8"
+      />
     )
   }
 
   return (
-    <ul className="grid gap-2">
+    <ul className="grid gap-1">
       {items.map((item) => {
         const selected = item.id === activeId
         return (
@@ -32,24 +36,21 @@ export function GenerationHistoryList({
               onClick={() => onSelect(item.id)}
               aria-pressed={selected}
               className={cn(
-                "flex w-full items-center gap-3 rounded-xl bg-card p-2 text-left ring-1 ring-foreground/10",
+                "flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1.5 text-left ring-1 ring-foreground/10",
                 selected && "ring-2 ring-pine",
               )}
             >
               {thumbs[item.id] ? (
-                <img src={thumbs[item.id]} alt="" className="size-16 rounded-lg object-cover" />
+                <img src={thumbs[item.id]} alt="" className="size-10 rounded-md object-cover" />
               ) : (
-                <span className="size-16 rounded-lg bg-muted" />
+                <Skeleton className="size-10 rounded-md" />
               )}
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">
                   {surfaceLabel(item.surface)} · {item.productName}
                 </span>
-                <span className="block text-xs text-muted-foreground">
-                  {item.productSku} · {formatWhen(item.createdAt)}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {providerLabel(item.provider)} · {formatBrl(item.estimatedCostBrl)}
+                <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                  {item.productSku} · {item.processingMs} ms · {formatWhen(item.createdAt)}
                 </span>
               </span>
             </button>
